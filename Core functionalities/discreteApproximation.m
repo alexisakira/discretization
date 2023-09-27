@@ -39,6 +39,11 @@
 % Version 1.3: May 26, 2019
 %
 % Changed algorithm to 'trust-region' to use Hessian
+%
+% Version 1.4: September 27, 2023
+%
+% Changed fminunc option for Matlab 2023b
+% Display warning if moment error is large
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 
 function [p,lambdaBar,momentError] = discreteApproximation(D,T,TBar,q,lambda0)
@@ -58,15 +63,20 @@ if size(Tx,2) ~= N || length(TBar) ~= L
     error('Dimension mismatch')
 end
 
-% Default prior weights
-if nargin == 3
-    q = ones(1,N)./N;
+% Set default parameters if not provided
+if nargin < 4
+    q = ones(1,N)./N; % uniform distribution
+end
+if nargin < 5
+    lambda0 = zeros(L,1);
 end
 
 % Compute maximum entropy discrete distribution
 
 %options = optimset('TolFun',1e-10,'TolX',1e-10,'Display','off','GradObj','on','Hessian','on');
-options = optimset('TolFun',1e-10,'TolX',1e-10,'Display','off','Algorithm','trust-region');
+%options = optimset('TolFun',1e-10,'TolX',1e-10,'Display','off','Algorithm','trust-region');
+options = optimoptions('fminunc','TolFun',1e-10,'TolX',1e-10,'Display','off',...
+    'Algorithm','trust-region','SpecifyObjectiveGradient',true);
 
 % Sometimes the algorithm fails to converge if the initial guess is too far
 % away from the truth. If this occurs, the program tries an initial guess
@@ -83,5 +93,8 @@ end
 Tdiff = Tx-repmat(TBar,1,N);
 p = (q.*exp(lambdaBar'*Tdiff))./obj;
 momentError = gradObj./obj;
+
+if norm(momentError) > 1e-5
+    warning('Large moment error. Consider increasing number of points or expanding domain')
 
 end
