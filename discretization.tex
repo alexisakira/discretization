@@ -1,0 +1,690 @@
+\begin{filecontents*}{discretization-references.bib}
+@Article{FarmerToda2017QE,
+  author  = {Farmer, Leland E. and Toda, Alexis Akira},
+  title   = {Discretizing Nonlinear, Non-{G}aussian {M}arkov Processes with Exact Conditional Moments},
+  journal = {Quantitative Economics},
+  year    = {2017},
+  volume  = {8},
+  number  = {2},
+  pages   = {651--683},
+  month   = jul,
+  doi     = {10.3982/QE737},
+}
+
+@Article{TanakaToda2013EL,
+  author  = {Tanaka, Ken'ichiro and Toda, Alexis Akira},
+  title   = {Discrete Approximations of Continuous Distributions by Maximum Entropy},
+  journal = {Economics Letters},
+  year    = {2013},
+  volume  = {118},
+  number  = {3},
+  pages   = {445--450},
+  month   = mar,
+  doi     = {10.1016/j.econlet.2012.12.020},
+}
+
+@Article{TanakaToda2015SINUM,
+  author  = {Tanaka, Ken'ichiro and Toda, Alexis Akira},
+  title   = {Discretizing Distributions with Exact Moments: Error Estimate and Convergence Analysis},
+  journal = {{SIAM} Journal on Numerical Analysis},
+  year    = {2015},
+  volume  = {53},
+  number  = {5},
+  pages   = {2158--2177},
+  month   = jan,
+  doi     = {10.1137/140971269},
+}
+
+@Article{Toda2021CE,
+  author  = {Toda, Alexis Akira},
+  title   = {Data-based Automatic Discretization of Nonparametric Distributions},
+  journal = {Computational Economics},
+  year    = {2021},
+  volume  = {57},
+  pages   = {1217--1235},
+  month   = apr,
+  doi     = {10.1007/s10614-020-10012-6},
+}
+\end{filecontents*}
+
+\documentclass[a4paper,12pt]{article}
+\pdfoutput=1
+\usepackage{amsmath,amssymb}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{listings}
+\usepackage[inline,shortlabels]{enumitem}
+\usepackage[margin=1.15in]{geometry}
+\usepackage{setspace}
+\usepackage{microtype}
+\usepackage{csquotes}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  citecolor=blue!55!black,
+  urlcolor=magenta!70!black,
+  pdftitle={Farmer-Toda Discretization: MATLAB and Python User Guide},
+  pdfauthor={Alexis Akira Toda}
+}
+\usepackage{doi}
+
+\usepackage[
+  style=ext-authoryear-comp,
+  sorting=nyt,
+  dashed=false,
+  maxcitenames=2,
+  maxbibnames=99,
+  uniquelist=false,
+  uniquename=false,
+  giveninits=true,
+  natbib,
+  date=year
+]{biblatex}
+
+\AtBeginRefsection{\GenRefcontextData{sorting=ynt}}
+\AtEveryCite{\localrefcontext[sorting=ynt]}
+\DeclareFieldFormat{pages}{#1}
+\renewbibmacro{in:}{%
+  \ifentrytype{article}{}{\printtext{\bibstring{in}\intitlepunct}}}
+\DeclareFieldFormat[
+  article,inbook,incollection,inproceedings,patent,thesis,unpublished
+]{titlecase:title}{\MakeSentenceCase*{#1}}
+\addbibresource{discretization-references.bib}
+
+% Minimal mathematical definitions used below.
+\newcommand{\e}{\mathrm{e}}
+\newcommand{\diff}{\mathop{}\!\mathrm{d}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\CE}[1]{\operatorname{E}\!\left[#1\right]}
+\newcommand{\Cvar}[1]{\operatorname{Var}\!\left[#1\right]}
+
+\setlist[enumerate,1]{label=(\roman*)}
+\setlist[itemize]{itemsep=0.25em,topsep=0.4em}
+\onehalfspacing
+\setlength{\emergencystretch}{2em}
+
+\definecolor{codebackground}{RGB}{247,248,250}
+\definecolor{codeframe}{RGB}{210,214,220}
+\lstdefinestyle{guidecode}{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebackground},
+  frame=single,
+  rulecolor=\color{codeframe},
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=0.35em,
+  xrightmargin=0.35em,
+  aboveskip=0.8em,
+  belowskip=0.8em
+}
+\lstset{style=guidecode}
+
+\newcommand{\pkg}{\texttt{discretization}}
+\newcommand{\matlab}{\textsc{Matlab}}
+\newcommand{\python}{\textsc{Python}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\matgmar}{\texttt{discretization.\allowbreak
+discreteGaussian\allowbreak MixtureAR}}
+\newcommand{\matsv}{\texttt{discretization.\allowbreak
+discreteStochastic\allowbreak VolatilityAR}}
+\newcommand{\matdist}{\texttt{discretization.\allowbreak
+momentMatched\allowbreak Distribution}}
+\newcommand{\pygmar}{\texttt{discrete\_gaussian\_mixture\_\allowbreak ar}}
+\newcommand{\pysv}{\texttt{discrete\_stochastic\_\allowbreak volatility\_ar}}
+\newcommand{\pydist}{\texttt{moment\_matched\_\allowbreak distribution}}
+\newcommand{\matmaxent}{\texttt{discretization.\allowbreak
+maximumEntropy\allowbreak Weights}}
+\newcommand{\pymaxent}{\texttt{maximum\_entropy\_\allowbreak weights}}
+\newcommand{\matgmq}{\texttt{discretization.\allowbreak
+gaussianMixture\allowbreak Quadrature}}
+\newcommand{\pygmq}{\texttt{gaussian\_mixture\_\allowbreak quadrature}}
+\newcommand{\matnpgq}{\texttt{discretization.\allowbreak
+dataDriven\allowbreak GaussianQuadrature}}
+\newcommand{\pynpgq}{\texttt{data\_driven\_gaussian\_\allowbreak quadrature}}
+\newcommand{\matcirpdf}{\texttt{discretization.\allowbreak
+cirTransition\allowbreak Density}}
+\newcommand{\pycirpdf}{\texttt{cir\_transition\_\allowbreak density}}
+
+\title{Farmer--Toda Discretization\\
+\large MATLAB and Python User Guide}
+\author{Alexis Akira Toda\thanks{Department of Economics, Emory University.
+Email: \href{mailto:alexis.akira.toda@emory.edu}{alexis.akira.toda@emory.edu}.}}
+\date{First version: June 2, 2019\\Updated: \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This guide documents the Farmer--Toda routines for approximating continuous
+distributions and nonlinear Markov processes by finite-state models that match
+selected moments. The repository provides a namespaced \matlab{} package and a
+\python{} implementation with common model coverage, automated tests, and
+cross-language numerical reference checks. The guide describes installation,
+the public application programming interface (API), model-specific inputs and
+outputs, grid and moment choices, numerical safeguards, compatibility names,
+and the construction of new discretization routines.
+
+\medskip
+\noindent\textbf{Keywords:} discretization; Markov chain approximation;
+maximum entropy; quadrature; moment matching
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction}
+
+The \pkg{} repository implements the moment-preserving discretization method
+developed by \textcite{FarmerToda2017QE}, building on the maximum-entropy
+construction of \textcite{TanakaToda2013EL} and the convergence analysis in
+\textcite{TanakaToda2015SINUM}. The central idea is to start from a finite grid
+and a prior distribution, then adjust the probability weights so that selected
+moments agree with their targets.
+
+The modernized repository has two user-facing implementations:
+\begin{itemize}
+  \item a \matlab{} package called \code{discretization}, invoked through
+  names such as \code{discretization.discreteAR}; and
+  \item a \python{} package with snake-case names such as
+  \code{discrete\_ar}.
+\end{itemize}
+Historical \matlab{} entry points remain available as compatibility wrappers,
+but new code should use the package-qualified names in this guide. The two
+implementations are tested against deterministic \matlab{} R2024b reference
+outputs. Numerical solvers can produce small platform-dependent differences,
+so parity is assessed with explicit tolerances rather than bit-for-bit
+identity.
+
+Whenever these routines are used in research, please cite at least
+\textcite{FarmerToda2017QE}; citations to \textcite{TanakaToda2013EL} and
+\textcite{TanakaToda2015SINUM} are also appropriate when the
+maximum-entropy construction is material to the application.
+
+\section{Getting started}
+\label{sec:getting-started}
+
+\subsection{MATLAB}
+
+Add only the repository root to the \matlab{} path. Package and private helper
+resolution then occur automatically.
+
+\begin{lstlisting}[language=Matlab]
+addpath('path/to/discretization-master')
+
+[P, X] = discretization.discreteAR(0, 0.9, 0.1, 9);
+\end{lstlisting}
+
+The implementation uses optimization and probability-distribution routines,
+including \code{fminunc}, \code{fmincon}, \code{lsqnonneg}, \code{normpdf},
+and \code{norminv}. A standard installation therefore requires the
+Optimization Toolbox and the Statistics and Machine Learning Toolbox.
+
+\subsection{Python}
+
+Install the package from the repository's \code{python} directory. Python
+3.10 or newer, NumPy, and SciPy are required.
+
+\begin{lstlisting}
+python -m pip install ./python
+\end{lstlisting}
+
+\begin{lstlisting}[language=Python]
+from discretization import discrete_ar
+
+P, grid = discrete_ar(
+    mean=0.0,
+    persistence=0.9,
+    innovation_std=0.1,
+    state_count=9,
+)
+\end{lstlisting}
+
+\subsection{Output convention}
+
+All process routines return a row-stochastic transition matrix $P$. Entry
+$P_{ij}$ is the probability of moving from current state $i$ to destination
+state $j$. A univariate \python{} grid is one-dimensional. Multivariate and
+joint-state grids use one row per state variable and one column per Markov
+state. In \matlab{}, process grids follow the same row-by-variable convention.
+
+Tensor-product states are ordered with the last state dimension changing
+fastest. This detail matters when a transition matrix is combined with a value
+function, simulation code, or another tensor-product operator.
+
+\section{Public API}
+\label{sec:api}
+
+Table \ref{tab:api} lists the main public functions. The long descriptive names
+are intentional: they distinguish an autoregression with Gaussian-mixture
+innovations from a mixture autoregression, and they identify the particular
+stochastic-volatility model being approximated.
+
+\begin{table}[htbp]
+\centering
+\caption{Canonical public API}
+\label{tab:api}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.24\textwidth}
+>{\raggedright\arraybackslash}X
+>{\raggedright\arraybackslash}X@{}}
+\toprule
+Purpose & \matlab{} & \python{} \\
+\midrule
+Gaussian AR(1) & \code{discretization.discreteAR}
+& \code{discrete\_ar} \\
+Gaussian VAR(1) & \code{discretization.discreteVAR}
+& \code{discrete\_var} \\
+Cox--Ingersoll--Ross & \code{discretization.discreteCIR}
+& \code{discrete\_cir} \\
+AR with mixture shocks & \matgmar & \pygmar \\
+AR with stochastic volatility & \matsv & \pysv \\
+Distribution from moments & \matdist & \pydist \\
+Maximum-entropy weights & \matmaxent & \pymaxent \\
+Gaussian-mixture quadrature &
+\matgmq & \pygmq \\
+Data-driven quadrature &
+\matnpgq & \pynpgq \\
+CIR transition density & \matcirpdf & \pycirpdf \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Maximum-entropy moment matching}
+\label{sec:maxent}
+
+Let $D=(x_1,\ldots,x_N)$ be a fixed grid, let $q_n\geq 0$ be prior weights,
+and let $T(x_n)\in\R^L$ be the moment functions. The target moment vector is
+$\overline T\in\R^L$. The routines minimize Kullback--Leibler divergence from
+the prior subject to the probability and moment restrictions. The dual
+representation gives
+\begin{equation}
+  p_n(\lambda)
+  = \frac{q_n\exp\{\lambda^{\mathsf T}[T(x_n)-\overline T]\}}
+  {\sum_{j=1}^N q_j
+  \exp\{\lambda^{\mathsf T}[T(x_j)-\overline T]\}}.
+  \label{eq:maxent-probability}
+\end{equation}
+The gradient of the log normalizer is the moment error. The Hessian is the
+weighted covariance matrix of the moment functions.
+
+The modernized implementation evaluates the dual objective with a log-sum-exp
+shift, supplies analytic first and second derivatives, caches solver settings,
+and retains the best finite candidate across solver attempts. Before expensive
+higher-order solves, selected routines test whether the target lies in the
+convex hull generated by the finite grid. An infeasible target cannot be
+matched by any probability vector on that grid.
+
+The low-level interfaces are
+\begin{lstlisting}[language=Matlab]
+[p, lambda, momentError] = ...
+    discretization.maximumEntropyWeights(D, T, TBar, q, lambda0);
+\end{lstlisting}
+and
+\begin{lstlisting}[language=Python]
+p, dual, moment_error = maximum_entropy_weights(
+    grid, moment_function, target_moments, prior, dual0
+)
+\end{lstlisting}
+where \code{q}/\code{prior} and \code{lambda0}/\code{dual0} are optional.
+Grid points occupy columns in \matlab{} and the last array axis in \python{}.
+
+\section{Process discretization routines}
+\label{sec:processes}
+
+\subsection{Gaussian AR(1)}
+
+The Gaussian autoregression is
+\begin{equation}
+  x_t=(1-\rho)\mu+\rho x_{t-1}+\varepsilon_t,
+  \qquad \varepsilon_t\sim N(0,\sigma^2).
+\end{equation}
+The canonical calls are
+\begin{lstlisting}[language=Matlab]
+[P, X] = discretization.discreteAR( ...
+    mu, rho, sigma, Nm, method, nMoments, nSigmas);
+\end{lstlisting}
+\begin{lstlisting}[language=Python]
+P, grid = discrete_ar(
+    mean, persistence, innovation_std, state_count,
+    method="even", moment_count=2, grid_width=None,
+)
+\end{lstlisting}
+The default is an evenly spaced grid and two conditional moments. The
+\matlab{} routine also exposes its quadrature-grid variants. The current
+\python{} \code{discrete\_ar} interface supports the evenly spaced grid.
+
+\subsection{Gaussian VAR(1)}
+
+For
+\begin{equation}
+  y_t=b+B y_{t-1}+\eta_t,
+  \qquad \eta_t\sim N(0,\Psi),
+\end{equation}
+use
+\begin{lstlisting}[language=Matlab]
+[P, X] = discretization.discreteVAR( ...
+    b, B, Psi, Nm, nMoments, method, nSigmas);
+\end{lstlisting}
+\begin{lstlisting}[language=Python]
+P, grid = discrete_var(
+    constant, lag, innovation_covariance, state_count,
+    moment_count=2, method="even", grid_width=None,
+)
+\end{lstlisting}
+Here \code{Nm}/\code{state\_count} is the number of grid points in each
+dimension, so a $d$-dimensional VAR has $N_m^d$ states and an
+$N_m^d\times N_m^d$ transition matrix. The covariance matrix $\Psi$ must be
+positive definite and the spectral radius of $B$ must be below one.
+
+Available methods are \code{'even'}, \code{'quadrature'} (Gauss--Hermite),
+and \code{'quantile'}. The quantile method is retained for replication but is
+generally poor. For a weakly persistent process, quadrature can be accurate;
+for persistent processes, the evenly spaced grid is usually more reliable.
+The implementation rotates standardized innovations to make unconditional
+component variances as similar as possible. The two-dimensional rotation has a
+closed-form solution.
+
+\subsection[AR(p) with Gaussian-mixture shocks]{AR($p$) with Gaussian-mixture shocks}
+
+Consider
+\begin{equation}
+  x_t-\mu=\sum_{j=1}^p a_j(x_{t-j}-\mu)+\varepsilon_t,
+\end{equation}
+where $\varepsilon_t$ is an i.i.d. Gaussian mixture. The interfaces are
+\begin{lstlisting}[language=Matlab]
+[P, X] = discretization.discreteGaussianMixtureAR( ...
+    mu, A, pC, muC, sigmaC, Nm, nMoments, method, nSigmas);
+\end{lstlisting}
+\begin{lstlisting}[language=Python]
+P, grid = discrete_gaussian_mixture_ar(
+    mean, ar_coefficients, mixture_probabilities,
+    mixture_means, mixture_standard_deviations, state_count,
+    moment_count=2, method="even", grid_width=None,
+)
+\end{lstlisting}
+The vectors \code{pC}, \code{muC}, and \code{sigmaC} contain component
+probabilities, means, and standard deviations. Probabilities must be
+nonnegative and sum to one. The AR companion matrix must be stable.
+
+Grid methods are evenly spaced, Gauss--Legendre, Clenshaw--Curtis,
+Gauss--Hermite, and Gaussian-mixture quadrature. \matlab{} method strings use
+hyphens and \code{'GMQ'}; \python{} uses
+\code{'gauss\_legendre'}, \code{'clenshaw\_curtis'},
+\code{'gauss\_hermite'}, and \code{'gaussian\_mixture'}, while accepting the
+corresponding hyphenated aliases. Unless the process is weakly persistent and
+a quadrature prior is especially useful, the evenly spaced grid is the safest
+default. The number of states grows as $N_m^p$, so small $p$ is essential.
+
+\subsection{AR(1) with stochastic volatility}
+
+The joint model is
+\begin{align}
+  y_t &= \lambda y_{t-1}+u_t,
+  &u_t&\sim N(0,\e^{x_t}),\\
+  x_t &= (1-\rho)\mu+\rho x_{t-1}+\epsilon_t,
+  &\epsilon_t&\sim N(0,\sigma_E^2).
+\end{align}
+Use
+\begin{lstlisting}[language=Matlab]
+[P, yxGrid] = discretization.discreteStochasticVolatilityAR( ...
+    lambda, rho, sigmaU, sigmaE, Ny, Nx, method, nSigmaY);
+\end{lstlisting}
+\begin{lstlisting}[language=Python]
+P, joint_grid = discrete_stochastic_volatility_ar(
+    persistence, volatility_persistence,
+    unconditional_innovation_std, volatility_innovation_std,
+    state_count, volatility_state_count,
+    method="even", grid_width=None,
+)
+\end{lstlisting}
+The returned grid has the $y$ state first and log variance second. There are
+$N_yN_x$ joint states. The argument \code{sigmaU} is the unconditional
+standard deviation used to calibrate the innovation scale; \code{sigmaE} is
+the standard deviation of the log-variance innovation. The volatility process
+uses the same grid choices as \code{discreteVAR}. An evenly spaced grid is
+recommended when $\rho$ is large.
+
+\subsection{Cox--Ingersoll--Ross process}
+
+For the CIR diffusion
+\begin{equation}
+  \diff r_t=a(b-r_t)\diff t+\sigma\sqrt{r_t}\diff W_t,
+\end{equation}
+the transition density can be written
+\begin{equation}
+  f(r';r)=c\e^{-u-v}\left(\frac{v}{u}\right)^{q/2}
+  I_q(2\sqrt{uv}),
+\end{equation}
+where
+\begin{equation*}
+  c=\frac{2a}{(1-\e^{-a\Delta})\sigma^2},\quad
+  q=\frac{2ab}{\sigma^2}-1,\quad
+  u=cr\e^{-a\Delta},\quad v=cr'.
+\end{equation*}
+The Feller restriction $\sigma^2<2ab$ is imposed. The conditional moments are
+\begin{align*}
+  \CE{r'|r}&=r\e^{-a\Delta}+b(1-\e^{-a\Delta}),\\
+  \Cvar{r'|r}&=\frac{\sigma^2}{a}(1-\e^{-a\Delta})
+  \left(r\e^{-a\Delta}+\frac b2\right).
+\end{align*}
+
+The interfaces are
+\begin{lstlisting}[language=Matlab]
+[P, X] = discretization.discreteCIR( ...
+    a, b, sigma, Delta, N, Coverage, method);
+\end{lstlisting}
+\begin{lstlisting}[language=Python]
+P, grid = discrete_cir(
+    mean_reversion, long_run_mean, volatility, step,
+    state_count, coverage=0.999, method="exponential",
+)
+\end{lstlisting}
+Both evenly spaced and exponential grids are available. The exponential grid
+is the default because the process is positive and its stationary distribution
+can be concentrated near zero. The density itself is available through
+\code{cirTransitionDensity} and \code{cir\_transition\_density}.
+
+\section{Distribution and quadrature routines}
+
+\subsection{Distribution from centered moments}
+
+To construct an $N$-point distribution from centered moments, use
+\begin{lstlisting}[language=Matlab]
+[x, p] = discretization.momentMatchedDistribution( ...
+    N, cMoments, q);
+\end{lstlisting}
+\begin{lstlisting}[language=Python]
+grid, probability = moment_matched_distribution(
+    state_count, centered_moments, prior=None
+)
+\end{lstlisting}
+The first centered moment must be zero and the second must be positive. If the
+prior is omitted, a Gaussian prior is used. The grid spans
+$\sqrt{2N}$ standard deviations in each direction, as recommended by
+\textcite{FarmerToda2017QE}.
+
+\subsection{Gaussian-mixture quadrature}
+
+The functions \code{gaussianMixtureQuadrature} and
+\code{gaussian\_mixture\_quadrature} compute Gaussian-quadrature nodes and
+weights for a Gaussian mixture using the Golub--Welsch construction. A
+single-component input recovers ordinary Gaussian quadrature.
+
+\subsection{Data-driven Gaussian quadrature}
+
+The entry points are
+\begin{itemize}
+  \item \matlab{}: \code{dataDrivenGaussianQuadrature}; and
+  \item \python{}: \code{data\_driven\_gaussian\_quadrature}.
+\end{itemize}
+Both functions construct quadrature nodes directly from one-dimensional data.
+This method is separate from maximum-entropy moment matching and is based on
+\textcite{Toda2021CE}.
+
+An $N$-point rule requires moments through order $2N$. For positive or heavy-
+tailed data, apply the method to logged observations when appropriate and
+exponentiate the resulting nodes. This transformation reduces sensitivity to
+high-order raw moments.
+
+\section{Choosing grids and moments}
+\label{sec:choices}
+
+\begin{itemize}
+  \item \textbf{Start with two moments.} Matching the conditional mean and
+  variance usually provides a good balance between accuracy and feasibility.
+  Higher moments require more grid support and can be infeasible near grid
+  boundaries.
+  \item \textbf{Use an evenly spaced grid for persistent processes.} A wider
+  grid is often more valuable than a high-order quadrature rule when the
+  conditional distribution shifts substantially across current states.
+  \item \textbf{Use quadrature for weak persistence.} Gauss--Hermite or a
+  model-specific quadrature prior can be effective when conditional means stay
+  close to the center of the unconditional grid.
+  \item \textbf{Avoid the VAR quantile grid for new work.} It is retained for
+  replication and comparison.
+  \item \textbf{Respect dimensional growth.} With $N$ points in each of $d$
+  dimensions, the transition matrix contains $N^{2d}$ entries. Dense methods
+  become impractical quickly even when each one-dimensional solve is cheap.
+\end{itemize}
+
+When a warning reports that $k$ moments could not be matched, the routine uses
+the highest lower-order match that succeeded. The usual remedies are to widen
+the grid, increase the number of points, or request fewer moments. Suppressing
+the warning without checking the resulting moment errors is not recommended.
+
+\section{Writing a custom discretization routine}
+\label{sec:custom}
+
+A one-dimensional custom routine has four steps:
+\begin{enumerate}
+  \item choose grid points and quadrature/integration weights;
+  \item compute a strictly positive prior on that grid for each current state;
+  \item define scaled conditional moment functions and targets; and
+  \item call the maximum-entropy weight routine, checking the returned moment
+  error and providing a lower-order fallback when needed.
+\end{enumerate}
+
+For example, the following code constructs weights on a fixed grid with mean
+zero and variance one.
+
+\begin{lstlisting}[language=Matlab]
+D = linspace(-4, 4, 9);
+T = @(x) [x; x.^2];
+TBar = [0; 1];
+q = normpdf(D);
+
+[p, lambda, momentError] = ...
+    discretization.maximumEntropyWeights(D, T, TBar, q);
+\end{lstlisting}
+
+The equivalent \python{} call is
+
+\begin{lstlisting}[language=Python]
+import numpy as np
+from scipy.stats import norm
+from discretization import maximum_entropy_weights
+
+grid = np.linspace(-4, 4, 9)
+moment_function = lambda x: np.vstack((x, x**2))
+targets = np.array([0.0, 1.0])
+prior = norm.pdf(grid)
+
+probability, dual, moment_error = maximum_entropy_weights(
+    grid, moment_function, targets, prior
+)
+\end{lstlisting}
+
+Scaling moment functions by a representative grid magnitude generally improves
+conditioning. Prior weights need not sum to one, but they must be nonnegative
+with at least one positive entry. Very small positive floors are useful when a
+density underflows in the tails.
+
+\section{Numerical safeguards and verification}
+
+The modernized code includes the following safeguards:
+\begin{itemize}
+  \item log-sum-exp evaluation of the dual objective;
+  \item analytic gradient and Hessian calculations;
+  \item finite-candidate fallback when an optimizer fails;
+  \item convex-hull feasibility checks for selected moment targets;
+  \item positive floors for prior weights;
+  \item direct linear solves instead of explicit matrix inverses;
+  \item a closed-form two-dimensional VAR variance rotation; and
+  \item reduced temporary allocation in tensor-product transition matrices.
+\end{itemize}
+
+Automated tests cover row stochasticity, nonnegativity, default arguments,
+historical compatibility wrappers, alternate grid methods, higher-dimensional
+VAR structure, and reference parity between \matlab{} and \python{}. The
+reference files were generated with \matlab{} R2024b. Representative
+performance workloads are provided in the repository's \code{benchmarks}
+directory; measured times are machine-specific.
+
+\begingroup
+\singlespacing
+
+\section{Compatibility names}
+\label{sec:migration}
+
+Table \ref{tab:migration} maps historical \matlab{} calls to the canonical API.
+The old entry points forward to the package implementation and issue migration
+warnings. They remain available during modernization so that replication code
+does not break unexpectedly.
+
+\begin{table}[htbp]
+\centering
+\caption{MATLAB compatibility-name migration}
+\label{tab:migration}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}>{\ttfamily}l >{\ttfamily\raggedright\arraybackslash}X@{}}
+\toprule
+\normalfont Historical name & \normalfont Canonical replacement \\
+\midrule
+discreteAR & discretization.discreteAR \\
+discreteVAR & discretization.discreteVAR \\
+discreteCIR & discretization.discreteCIR \\
+discreteGMAR & \normalfont\matgmar \\
+discreteSV & \normalfont\matsv \\
+discreteNP & \normalfont\matdist \\
+discreteApproximation & \normalfont\matmaxent \\
+GaussianMixtureQuadrature & \normalfont\matgmq \\
+NPGQ & \normalfont\matnpgq \\
+CIRpdf & \normalfont\matcirpdf \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begingroup\raggedright
+The earlier descriptive package names
+\code{discreteARWith\allowbreak GaussianMixtureShocks},
+\code{discreteARWith\allowbreak StochasticVolatility},
+\code{discreteDistributionFrom\allowbreak Moments}, and
+\code{nonparametricGaussian\allowbreak Quadrature} also remain as \matlab{}
+compatibility wrappers.\par
+\endgroup
+
+\section{Citation and software responsibility}
+
+Validate this research software by checking grid coverage, moment errors,
+transition-row sums, and sensitivity to state placement. Report the language,
+revision, routine, grid method, state count, and requested moment count.
+
+Cite \textcite{FarmerToda2017QE} for the main method;
+\textcite{TanakaToda2013EL} and \textcite{TanakaToda2015SINUM} for the
+maximum-entropy foundations; and \textcite{Toda2021CE} for data-based
+nonparametric Gaussian quadrature.
+
+\footnotesize
+\setlength{\bibitemsep}{0pt}
+\printbibliography
+\endgroup
+
+\end{document}

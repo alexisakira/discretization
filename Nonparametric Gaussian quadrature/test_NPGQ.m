@@ -15,5 +15,5 @@ histogram(data);
 N = 9; % number of grid points
 
 tic
-[x,w] = NPGQ(data,N);
+[x,w] = discretization.dataDrivenGaussianQuadrature(data,N);
 toc

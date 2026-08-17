@@ -5,5 +5,5 @@ nMoments = 4;
 Nm = 9;
 
 tic
-[P,X] = discreteAR(mu,rho,sigma,Nm,'even',nMoments);
+[P,X] = discretization.discreteAR(mu,rho,sigma,Nm,'even',nMoments);
 toc

@@ -20,8 +20,8 @@ cMoments1 = [0, 1, 0, 3]; % Gaussian
 cMoments2 = [0, 1, 0, 5]; % some example
 
 tic
-[x1,p1] = discreteNP(N,cMoments1);
-[x2,p2] = discreteNP(N,cMoments2);
+[x1,p1] = discretization.momentMatchedDistribution(N,cMoments1);
+[x2,p2] = discretization.momentMatchedDistribution(N,cMoments2);
 toc
 
 figure

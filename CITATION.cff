@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite the preferred article below."
+title: "Farmer-Toda Discretization"
+type: software
+version: 0.1.0
+date-released: 2026-08-17
+license: GPL-3.0-only
+repository-code: "https://github.com/alexisakira/discretization"
+url: "https://github.com/alexisakira/discretization"
+authors:
+  - family-names: Farmer
+    given-names: Leland E.
+  - family-names: Toda
+    given-names: Alexis Akira
+    email: alexis.akira.toda@emory.edu
+preferred-citation:
+  type: article
+  title: "Discretizing Nonlinear, Non-Gaussian Markov Processes with Exact Conditional Moments"
+  authors:
+    - family-names: Farmer
+      given-names: Leland E.
+    - family-names: Toda
+      given-names: Alexis Akira
+  journal: Quantitative Economics
+  year: 2017
+  volume: 8
+  issue: 2
+  start: 651
+  end: 683
+  doi: 10.3982/QE737

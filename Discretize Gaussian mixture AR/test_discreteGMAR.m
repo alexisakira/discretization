@@ -9,17 +9,21 @@ sigmaC = [0.1293 0.0300];
 
 nMoments = 2;
 tic
-[PEven1,XEven1] = discreteGMAR(mu,A1,pC,muC,sigmaC,Nm,nMoments,'even');
+[PEven1,XEven1] = discretization.discreteGaussianMixtureAR( ...
+    mu,A1,pC,muC,sigmaC,Nm,nMoments,'even');
 toc
 tic
-[PEven2,XEven2] = discreteGMAR(mu,A2,pC,muC,sigmaC,Nm,nMoments,'even');
+[PEven2,XEven2] = discretization.discreteGaussianMixtureAR( ...
+    mu,A2,pC,muC,sigmaC,Nm,nMoments,'even');
 toc
 
 tic
-[PGMQ1,XGMQ1] = discreteGMAR(mu,A1,pC,muC,sigmaC,Nm,nMoments,'GMQ');
+[PGMQ1,XGMQ1] = discretization.discreteGaussianMixtureAR( ...
+    mu,A1,pC,muC,sigmaC,Nm,nMoments,'GMQ');
 toc
 tic
-[PGMQ2,XGMQ2] = discreteGMAR(mu,A2,pC,muC,sigmaC,Nm,nMoments,'GMQ');
+[PGMQ2,XGMQ2] = discretization.discreteGaussianMixtureAR( ...
+    mu,A2,pC,muC,sigmaC,Nm,nMoments,'GMQ');
 toc
 
 [v,~] = eigs(PEven1',1,1);

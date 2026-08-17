@@ -18,18 +18,24 @@
 % q         - (1 X N) vector of prior weights for each point in the grid.
 %
 % Outputs:
-% obj       - scalar value of objective function evaluated at lambda
+% obj       - scalar value of the log objective evaluated at lambda
 % Optional (useful for optimization routines):
 % gradObj   - (L x 1) gradient vector of the objective function evaluated
 %             at lambda
 % hessianObj- (L x L) hessian matrix of the objective function evaluated at
 %             lambda
+% p         - (1 x N) normalized probability weights at lambda
 %
 % Version 1.2: June 7, 2016
 %
+% Version 2.0: August 17, 2026
+%
+% Evaluate the equivalent log-sum-exp objective to avoid numerical
+% overflow and return its analytic gradient and Hessian.
+%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 
-function [obj,gradObj,hessianObj] = entropyObjective(lambda,Tx,TBar,q)
+function [obj,gradObj,hessianObj,p] = entropyObjective(lambda,Tx,TBar,q)
 
 % Some error checking
 
@@ -39,27 +45,44 @@ end
 
 [L,N] = size(Tx);
 
-if length(lambda) ~= L || length(TBar) ~= L || length(q) ~= N
+if numel(lambda) ~= L || numel(TBar) ~= L || numel(q) ~= N
     error('Dimensions of inputs are not compatible.')
 end
+if any(~isfinite(lambda)) || any(~isfinite(Tx),'all') || ...
+        any(~isfinite(TBar)) || any(~isfinite(q))
+    error('Inputs to entropyObjective must be finite.')
+end
+if any(q < 0) || ~any(q > 0)
+    error('Prior weights must be nonnegative with at least one positive value.')
+end
 
-% Compute objective function
+lambda = lambda(:);
+TBar = TBar(:);
+q = q(:)';
 
-Tdiff = Tx-repmat(TBar,1,N);
-temp = q.*exp(lambda'*Tdiff);
-obj = sum(temp);
+% Compute the log-sum-exp objective. Subtracting the largest log weight
+% prevents overflow without changing the normalized probabilities.
+
+Tdiff = Tx-TBar;
+logWeights = log(q) + lambda'*Tdiff;
+shift = max(logWeights);
+scaledWeights = exp(logWeights-shift);
+normalizer = sum(scaledWeights);
+obj = shift + log(normalizer);
 
 % Compute gradient of objective function
 
 if nargout > 1
-    temp2 = bsxfun(@times,temp,Tdiff);
-    gradObj = sum(temp2,2);
+    p = scaledWeights/normalizer;
+    weightedDifferences = Tdiff.*p;
+    gradObj = sum(weightedDifferences,2);
 end
 
 % Compute hessian of objective function
 
 if nargout > 2
-    hessianObj = temp2*Tdiff';
+    hessianObj = weightedDifferences*Tdiff' - gradObj*gradObj';
+    hessianObj = (hessianObj+hessianObj')/2;
 end
 
 end

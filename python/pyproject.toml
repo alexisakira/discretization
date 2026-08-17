@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "farmer-toda-discretization"
+version = "0.1.0"
+description = "Maximum-entropy discretization of stochastic processes"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Leland E. Farmer"},
+    {name = "Alexis Akira Toda"},
+]
+maintainers = [
+    {name = "Alexis Akira Toda", email = "alexis.akira.toda@emory.edu"},
+]
+keywords = [
+    "discretization",
+    "economics",
+    "markov-chain",
+    "maximum-entropy",
+    "quadrature",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/alexisakira/discretization"
+Documentation = "https://github.com/alexisakira/discretization/blob/master/discretization.pdf"
+Repository = "https://github.com/alexisakira/discretization.git"
+Issues = "https://github.com/alexisakira/discretization/issues"
+Changelog = "https://github.com/alexisakira/discretization/blob/master/CHANGELOG.md"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+discretization = ["py.typed"]

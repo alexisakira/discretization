@@ -8,5 +8,6 @@ Ny = 9;
 Nx = 5;
 
 tic
-[P,yxGrids] = discreteSV(lambda,rho,sigmaU,sigmaE,Ny,Nx);
+[P,yxGrids] = discretization.discreteStochasticVolatilityAR( ...
+    lambda,rho,sigmaU,sigmaE,Ny,Nx);
 toc
