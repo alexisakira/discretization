@@ -1,12 +1,14 @@
 """Maximum-entropy discretization of stochastic processes."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .distributions import moment_matched_distribution
 from .markov import (
     cir_transition_density,
     discrete_ar,
     discrete_cir,
+    discrete_ou,
+    discrete_ou_asymmetric_laplace_jumps,
 )
 from .maxent import (
     entropy_objective,
@@ -32,6 +34,8 @@ __all__ = [
     "data_driven_gaussian_quadrature",
     "discrete_ar",
     "discrete_cir",
+    "discrete_ou",
+    "discrete_ou_asymmetric_laplace_jumps",
     "discrete_gaussian_mixture_ar",
     "discrete_stochastic_volatility_ar",
     "discrete_var",

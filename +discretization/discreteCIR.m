@@ -98,14 +98,7 @@ for ii = 1:N
 
     % On an evenly spaced grid, equal quadrature weights cancel after
     % normalization, so the prior is proportional to the transition density.
-    q = discretization.cirTransitionDensity( ...
-        X,x,kappa,mu,sigma,Delta);
-    if any(~isfinite(q)) || ~any(q > 0)
-        error('discretization:discreteCIR:InvalidPrior', ...
-            'The transition-density prior is not finite and positive in row %d.',ii)
-    end
-    q = max(q,realmin);
-    q = q/sum(q);
+    q = relativeReferenceWeights(cirLogDensity(X,x,kappa,mu,sigma,Delta));
 
     momentFunction = @(state) [ ...
         (state-condMean)./scalingFactor; ...

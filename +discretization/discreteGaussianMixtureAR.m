@@ -7,7 +7,7 @@
 %
 % Usage:
 %       [P,X,diagnostics] = discretization.discreteGaussianMixtureAR(...
-%           mu,A,pC,muC,sigmaC,Nm,nMoments,method,nSigmas)
+%           mu,A,pC,muC,sigmaC,Nm,nMoments,method,nSigmas,varargin)
 %
 % Inputs:
 % mu        - AR location (unconditional mean if the innovations have mean 0)
@@ -20,6 +20,7 @@
 % nMoments  - number of moments to match (default = 2)
 % method    - quadrature method (default = 'even')
 % nSigmas   - grid half-width in stationary standard deviations
+% Name-value: 'ProbabilityFloor' (default 0); 1e-8 selects the 0.1.0 algorithm.
 %
 % The process is X_t = mu*(1-sum(A)) + A*[X_{t-1};...] + epsilon_t.
 % Its unconditional mean is mu + sum(pC.*muC)/(1-sum(A)). To make mu
@@ -32,9 +33,11 @@
 % downgradedRows identifies rows that match fewer moments than requested.
 % Grid width and resolution should be checked separately for spiky mixtures.
 % The historical default width is retained; pass nSigmas explicitly when
-% comparing resolutions. Diagnostics are empty for the optional methods.
+% comparing resolutions. Optional quadrature methods also return diagnostics.
 
-function [P,X,diagnostics] = discreteGaussianMixtureAR(mu,A,pC,muC,sigmaC,Nm,nMoments,method,nSigmas)
+function [P,X,diagnostics] = discreteGaussianMixtureAR(mu,A,pC,muC,sigmaC,Nm,varargin)
+[options,floorValue] = processOptions(varargin,{2,'even',[]});
+[nMoments,method,nSigmas] = options{:};
 
 if nargin < 6
     error('discretization:discreteGaussianMixtureAR:NotEnoughInputs', ...
@@ -63,12 +66,6 @@ pC = double(pC(:))/probabilitySum;
 muC = double(muC(:));
 sigmaC = double(sigmaC(:));
 
-if nargin < 7
-    nMoments = 2;
-end
-if nargin < 8
-    method = 'even';
-end
 validateattributes(nMoments,{'numeric'}, ...
     {'real','finite','scalar','integer','>=',1,'<=',4},mfilename,'nMoments',7)
 nMoments = double(nMoments);
@@ -87,7 +84,7 @@ if rho >= 1
     error('discretization:discreteGaussianMixtureAR:NonstationaryProcess', ...
         'The AR companion matrix must have spectral radius less than one.')
 end
-if nargin < 9
+if isempty(nSigmas)
     if rho <= 1-2/(Nm-1)
         nSigmas = sqrt(2*(Nm-1));
     else
@@ -98,6 +95,11 @@ validateattributes(nSigmas,{'numeric'}, ...
     {'real','finite','scalar','positive'},mfilename,'nSigmas',9)
 nSigmas = double(nSigmas);
 
+if floorValue > 0
+    [P,X] = legacyDiscreteGaussianMixtureAR(mu,A,pC,muC,sigmaC,Nm,nMoments,method,nSigmas,floorValue);
+    diagnostics = struct('probabilityFloor',floorValue,'matchedMoments',[]);
+    return
+end
 diagnostics = [];
 if strcmp(method,'even')
     [P,X,diagnostics] = discreteGaussianMixtureAREven( ...
@@ -105,7 +107,7 @@ if strcmp(method,'even')
     return
 end
 
-% Historical optional quadrature methods; their numerical cleanup is deferred.
+% Optional quadrature methods use the same log-weight and sequential matching rules.
 sigmaC2 = sigmaC.^2;
 T1 = pC'*muC; % mean
 T2 = pC'*(muC.^2+sigmaC2); % uncentered second moment
@@ -153,81 +155,29 @@ X = allcomb2(ones(K,1)*X1)'; % K*Nm^K matrix of grid points
 stateCount = Nm^K;
 lagStateCount = Nm^(K-1);
 P = zeros(stateCount); % transition probability matrix
-scalingFactor = max(abs(X1));
-kappa = 1e-8;
-
-if strcmp(method,'gauss-hermite')
-    referencePDF = normpdf(X1',0,sigma);
-elseif strcmp(method,'GMQ')
-    referencePDF = mixturePDF(X1');
-end
-
-for ii = 1:stateCount
-    
-    condMean = mu*(1-sum(A))+A*X(:,ii);
-    xPDF = (X1-condMean)';
-    switch method
-        case 'gauss-hermite'
-            q = W.*(mixturePDF(xPDF)./referencePDF)';
-        case 'GMQ'
-            q = W.*(mixturePDF(xPDF)./referencePDF)';
-        otherwise
-            q = W.*mixturePDF(xPDF)';
+matched = zeros(stateCount,1);
+errors = zeros(stateCount,4);
+innovationMean = T1;
+centralMeans = muC-innovationMean;
+targets = [0;1;pC'*(centralMeans.^3+3*centralMeans.*sigmaC2)/sigma^3; ...
+    pC'*(centralMeans.^4+6*centralMeans.^2.*sigmaC2+3*sigmaC2.^2)/sigma^4];
+for row = 1:stateCount
+    baseMean = mu*(1-sum(A))+A*X(:,row);
+    logPrior = log(W)+gaussianMixtureLogDensity(X1-baseMean,pC,muC,sigmaC)';
+    if strcmp(method,'gauss-hermite')
+        logPrior = logPrior-(-0.5*(X1/sigma).^2-log(sigma)-0.5*log(2*pi));
+    elseif strcmp(method,'GMQ')
+        logPrior = logPrior-gaussianMixtureLogDensity(X1,pC,muC,sigmaC)';
     end
-    
-    q(q < kappa) = kappa;
-    standardizedGrid = (X1-condMean)/scalingFactor;
-    standardizedPowers = (standardizedGrid'.^(1:4))';
-    scaledTargets = TBar./(scalingFactor.^(1:4)');
-
-    if nMoments == 1
-        p1Row = maximumEntropyWeightsCore(X1,...
-            @(unused) standardizedPowers(1,:),scaledTargets(1),q,0);
-    else
-        [p,lambda,momentError] = maximumEntropyWeightsCore(X1,...
-            @(unused) standardizedPowers(1:2,:),scaledTargets(1:2),...
-            q,zeros(2,1));
-        if norm(momentError) > 1e-5
-            warning('Failed to match first 2 moments. Just matching 1.')
-            p1Row = maximumEntropyWeightsCore(X1,...
-                @(unused) standardizedPowers(1,:),scaledTargets(1),q,0);
-        elseif nMoments == 2
-            p1Row = p;
-        else
-            matchedHigherMoment = false;
-            if nMoments == 4 && momentTargetFeasible(...
-                    standardizedPowers,scaledTargets)
-                [pnew,~,momentError] = maximumEntropyWeightsCore(X1,...
-                    @(unused) standardizedPowers,scaledTargets,...
-                    q,[lambda;0;0]);
-                if norm(momentError) <= 1e-5
-                    p1Row = pnew;
-                    matchedHigherMoment = true;
-                end
-            end
-            if ~matchedHigherMoment
-                if momentTargetFeasible(standardizedPowers(1:3,:),...
-                        scaledTargets(1:3))
-                    [pnew,~,momentError] = maximumEntropyWeightsCore(X1,...
-                        @(unused) standardizedPowers(1:3,:),...
-                        scaledTargets(1:3),q,[lambda;0]);
-                else
-                    momentError = Inf;
-                end
-                if norm(momentError) > 1e-5
-                    warning('Failed to match first 3 moments. Just matching 2.')
-                    p1Row = p;
-                else
-                    p1Row = pnew;
-                    if nMoments == 4
-                        warning('Failed to match first 4 moments. Just matching 3.')
-                    end
-                end
-            end
-        end
-    end
-    lagIndex = ceil(ii/Nm);
-    P(ii,lagIndex:lagStateCount:stateCount) = p1Row;
+    prior = relativeReferenceWeights(logPrior);
+    z = (X1-baseMean-innovationMean)/sigma;
+    powers = z.^((1:4)');
+    [probability,matched(row)] = sequentialMomentMatch(X1,powers,targets,prior,nMoments,1e-7);
+    errors(row,:) = (powers*probability'-targets)';
+    lagIndex = ceil(row/Nm);
+    P(row,lagIndex:lagStateCount:stateCount) = probability;
 end
-
+diagnostics = struct('requestedMoments',nMoments,'matchedMoments',matched, ...
+    'standardizedMomentErrors',errors,'momentTolerance',1e-7, ...
+    'downgradedRows',find(matched < nMoments),'probabilityFloor',0);
 end

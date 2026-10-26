@@ -5,6 +5,7 @@
 %   discreteVAR                              - Gaussian VAR(1) process
 %   discreteCIR                              - Cox-Ingersoll-Ross process
 %   discreteOU                               - Ornstein-Uhlenbeck process
+%   discreteOUAsymmetricLaplaceJumps          - OU with aggregate AL jumps
 %   discreteGaussianMixtureAR                 - AR process with mixture shocks
 %   discreteStochasticVolatilityAR            - AR process with log AR(1) volatility
 %

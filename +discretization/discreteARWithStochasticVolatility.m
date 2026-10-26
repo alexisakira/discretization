@@ -1,7 +1,7 @@
-function [P,yxGrids] = discreteARWithStochasticVolatility(varargin)
+function varargout = discreteARWithStochasticVolatility(varargin)
 %DISCRETEARWITHSTOCHASTICVOLATILITY Compatibility name.
 warning('discretization:deprecatedFunction', ...
     ['discretization.discreteARWithStochasticVolatility is deprecated. ' ...
     'Use discretization.discreteStochasticVolatilityAR instead.'])
-[P,yxGrids] = discretization.discreteStochasticVolatilityAR(varargin{:});
+[varargout{1:nargout}] = discretization.discreteStochasticVolatilityAR(varargin{:});
 end

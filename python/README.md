@@ -99,3 +99,20 @@ When using this package in research, please cite:
 The repository's
 [user guide](https://github.com/alexisakira/discretization/blob/master/discretization.pdf)
 documents the full API, numerical guidance, and additional references.
+
+## Version 0.2.0 numerical change
+
+Default transition matrices change: reference densities no longer receive an
+absolute `1e-8` floor. This matters for likelihood-based estimation because
+artificial tail mass can accumulate over many observations. Relative log-weight
+stabilization retains rare transitions without changing grid-width defaults.
+
+Use MATLAB `'ProbabilityFloor',1e-8` or Python `probability_floor=1e-8` to recover
+the 0.1.0 process algorithms. The option floors reference weights before moment
+matching; final transition probabilities need not exceed the floor. See
+[API.md](../API.md) for diagnostics, fallback rules and examples.
+
+Both languages now include Gaussian OU, OU with aggregate asymmetric-Laplace
+jumps, and the CIR rewrite with an automatically selected feasible even grid.
+New defaults are checked against MATLAB R2026a fixtures; historical R2024b
+fixtures remain available for legacy regression tests.

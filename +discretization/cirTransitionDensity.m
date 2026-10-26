@@ -17,17 +17,7 @@ if sigma^2 > 2*a*b
     error('It must be sigma^2 <= 2*a*b')
 end
 
-%% define parameters
-
-c = (2*a)/((1-exp(-a*Delta))*sigma^2);
-q = 2*a*b/sigma^2 - 1;
-u = c*r*exp(-a*Delta);
-v = c*x;
-
-%% compute density
-
-besselArgument = 2*sqrt(u*v);
-density = c*exp(-u-v+besselArgument).*(v/u).^(q/2).*besseli(q,besselArgument,1);
-
+validateattributes(x,{'numeric'},{'real','finite','nonnegative'});
+validateattributes([r,a,b,sigma,Delta],{'numeric'},{'real','finite','positive'});
+density = exp(cirLogDensity(x,r,a,b,sigma,Delta));
 end
-

@@ -7,6 +7,23 @@ by Leland E. Farmer & Alexis Akira Toda
 Please read the [discretization guide](discretization.pdf) for installation,
 usage, numerical guidance, compatibility names, and citations.
 
+## Version 0.2.0 numerical change
+
+Default transition matrices change: reference densities no longer receive an
+absolute `1e-8` floor. This matters for likelihood-based estimation because
+artificial tail mass can accumulate over many observations. Relative log-weight
+stabilization retains rare transitions without changing grid-width defaults.
+
+Use MATLAB `'ProbabilityFloor',1e-8` or Python `probability_floor=1e-8` to recover
+the 0.1.0 process algorithms. The option floors reference weights before moment
+matching; final transition probabilities need not exceed the floor. See
+[API.md](API.md) for diagnostics, fallback rules and examples.
+
+Both languages now include Gaussian OU, OU with aggregate asymmetric-Laplace
+jumps, and the CIR rewrite with an automatically selected feasible even grid.
+New defaults are checked against MATLAB R2026a fixtures; historical R2024b
+fixtures remain available for legacy regression tests.
+
 ## MATLAB usage
 
 Add only the repository root to the MATLAB path and use the namespaced API:
@@ -39,8 +56,8 @@ log-sum-exp maximum-entropy objective, and a Python port under `python/`.
 The Python port includes the maximum-entropy core, Gaussian AR and VAR
 processes, Cox-Ingersoll-Ross, AR processes with Gaussian-mixture shocks or
 stochastic volatility, nonparametric moment discretization, and reusable
-quadrature routines. Each model family is checked against deterministic MATLAB
-R2024b reference outputs.
+quadrature routines. Model families are checked against deterministic MATLAB reference outputs.
+Version 0.2.0 defaults use R2026a fixtures; explicit legacy floors use R2024b fixtures.
 
 The MATLAB implementation has also been profiled and optimized while retaining
 pre-optimization numerical reference checks. Reproducible workloads and the

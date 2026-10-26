@@ -7,7 +7,7 @@ function setupOnce(testCase)
 repositoryRoot = fileparts(fileparts(mfilename('fullpath')));
 addpath(genpath(repositoryRoot));
 testCase.TestData.Fixture = load(fullfile(repositoryRoot,...
-    'reference_data','matlab_r2024b_performance.mat'));
+    'reference_data','matlab_r2026a_0_2.mat'));
 warningState = warning;
 testCase.TestData.WarningCleanup = onCleanup(@() warning(warningState));
 warning('off','all');

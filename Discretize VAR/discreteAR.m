@@ -1,6 +1,6 @@
-function [P,X] = discreteAR(varargin)
-%DISCRETEAR Compatibility entry point for discretization.discreteAR.
+function varargout = discreteAR(varargin)
+% Compatibility wrapper; all options and diagnostics are forwarded.
 warning('discretization:legacyEntryPoint', ...
-    'Use discretization.discreteAR instead of the unqualified entry point.')
-[P,X] = discretization.discreteAR(varargin{:});
+    'Use discretization.discreteAR instead of discreteAR.');
+[varargout{1:nargout}] = discretization.discreteAR(varargin{:});
 end
