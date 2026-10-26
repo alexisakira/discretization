@@ -26,11 +26,6 @@ if isempty(nSigmas)
     end
 end
 
-% Check that Nm is a valid number of grid points
-if ~isnumeric(Nm) || Nm < 3 || rem(Nm,1) ~= 0
-    error('Nm must be a positive integer greater than 3')
-end
-
 % Check that nMoments is a valid number
 if ~isnumeric(nMoments) || nMoments < 1 || nMoments > 4 || ~((rem(nMoments,1) == 0) || (nMoments == 1))
     error('nMoments must be either 1, 2, 3, 4')

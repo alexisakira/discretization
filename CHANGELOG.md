@@ -41,6 +41,13 @@ All notable changes to this project will be documented in this file.
   include tests, the OU compatibility entry point, regenerated MATLAB R2026a
   default fixtures, and updated guide/API documentation. Preserve the historical
   R2024b fixtures as independent legacy regression checks.
+- Handle small CIR noncentrality with a positive log-series fallback and the
+  central Gamma limit, avoiding underflow at valid long observation gaps.
+- Center Hermite and mixture Gaussian-quadrature reference densities on the AR
+  location, restoring location invariance in both languages.
+- Expose nested SV volatility-chain fallbacks in Python, matching MATLAB.
+  Add long-gap CIR, shifted-quadrature and nested-diagnostic regression tests;
+  remove duplicate validation and unused density evaluations on default paths.
 
 ## 0.1.0 - 2026-08-17
 

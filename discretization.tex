@@ -495,6 +495,11 @@ former coverage and exponential-grid interface has been retired. The density
 itself is available through \code{cirTransitionDensity} and
 \code{cir\_transition\_density}.
 
+The log-density calculation uses scaled Bessel functions with a positive
+log-series fallback when the scaled function underflows. At zero noncentrality
+it uses the central Gamma limit. Both languages apply these rules to density
+evaluation and transition construction, including long observation gaps.
+
 \subsection{Ornstein--Uhlenbeck process}
 
 The centered Gaussian OU construction matches the exact conditional mean and

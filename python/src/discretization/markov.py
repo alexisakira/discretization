@@ -7,8 +7,8 @@ import warnings
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy.stats import ncx2
 
+from ._cir import cir_log_density
 from ._matching import (
     ProcessResult,
     diagnostics,
@@ -37,18 +37,11 @@ def cir_transition_density(
     if np.any(~np.isfinite(future)) or np.any(future < 0):
         raise ValueError("future_state must be finite and nonnegative")
 
-    decay = math.exp(-mean_reversion * step)
-    scale = volatility**2 * (-math.expm1(-mean_reversion * step)) / (4 * mean_reversion)
-    degrees_freedom = 4 * mean_reversion * long_run_mean / volatility**2
-    noncentrality = current_state * decay / scale
-    density = ncx2.pdf(future / scale, degrees_freedom, noncentrality) / scale
-    # SciPy assigns zero at x=0 even for df=2; use the continuous right limit
-    # at Feller equality, consistent with the scaled-Bessel MATLAB formula.
-    if degrees_freedom == 2:
-        density = np.where(
-            future == 0, math.exp(-noncentrality / 2) / (2 * scale), density
+    return np.exp(
+        cir_log_density(
+            future, current_state, mean_reversion, long_run_mean, volatility, step
         )
-    return density
+    )
 
 
 def discrete_cir(
@@ -124,15 +117,13 @@ def discrete_cir(
     r = np.clip(math.log(n) / (n - 1), lower + trim, upper - trim)
     grid = long_run_mean * r * np.arange(1, n + 1)
     transition = np.zeros((n, n))
-    scale = volatility**2 * c / (4 * mean_reversion)
-    df = 4 * mean_reversion * long_run_mean / volatility**2
     for row, x in enumerate(grid):
         mean = rho * x + c * long_run_mean
         variance = (
             volatility**2 / mean_reversion * c * (rho * x + long_run_mean * c / 2)
         )
         prior = relative_weights(
-            ncx2.logpdf(grid / scale, df, x * rho / scale) - math.log(scale)
+            cir_log_density(grid, x, mean_reversion, long_run_mean, volatility, step)
         )
         z = (grid - mean) / math.sqrt(variance)
         probability, matched = sequential_match(
@@ -266,9 +257,6 @@ def discrete_ar(
     for row, current_state in enumerate(grid):
         conditional_mean = mean * (1 - persistence) + persistence * current_state
         standardized = (grid - conditional_mean) / innovation_std
-        prior = np.exp(-0.5 * standardized**2) / (
-            innovation_std * math.sqrt(2 * math.pi)
-        )
         if not legacy:
             prior = relative_weights(-0.5 * standardized**2)
             powers = standardized[None, :] ** np.arange(1, 5)[:, None]
@@ -278,6 +266,9 @@ def discrete_ar(
             transition[row] = probability
             errors[row] = powers @ probability - np.array([0.0, 1.0, 0.0, 3.0])
             continue
+        prior = np.exp(-0.5 * standardized**2) / (
+            innovation_std * math.sqrt(2 * math.pi)
+        )
         prior = np.maximum(prior, probability_floor)
 
         def moments(order: int):

@@ -31,5 +31,18 @@ for method = {'quantile','quadrature'}
     [f.(['var',method{1},'P']),f.(['var',method{1},'X'])] = ...
         discretization.discreteVAR(0,.4,.01,21,4,method{1});
 end
+for gap = [10,1000]
+    [f.(['cirGap',num2str(gap),'P']),f.(['cirGap',num2str(gap),'X'])] = ...
+        discretization.discreteCIR(1,1,.1,gap,51);
+end
+for index = [4,5]
+    for moments = [2,4]
+        f.(['gmShiftP',num2str(index),'M',num2str(moments)]) = ...
+            discretization.discreteGaussianMixtureAR( ...
+                10,.4,[.4,.6],[-.1,.1],[.1,.2],21,moments,methods{index},4);
+    end
+end
+[f.svFallbackP,f.svFallbackX,f.svFallbackDiagnostics] = ...
+    discretization.discreteStochasticVolatilityAR(0,.99,.007,.06,9,3,'quantile');
 save(fullfile(root,'reference_data','matlab_r2026a_0_2.mat'),'-struct','f','-v7');
 end

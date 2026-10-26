@@ -94,7 +94,9 @@ The third MATLAB output and Python `return_diagnostics=True` expose
 `standardizedMomentErrors` / `standardized_moment_errors`, `momentTolerance` /
 `moment_tolerance` (`1e-7`), and `downgradedRows` / `downgraded_rows`. VAR counts
 and residuals are per rotated dimension. SV also constructs its volatility chain
-with the same floor convention. MATLAB row indices are one-based; Python indices
+with the same floor convention. Its `volatility` field contains the nested
+volatility-chain diagnostics in both languages; these can report fallbacks even
+when every earnings row matches two moments. MATLAB row indices are one-based; Python indices
 are zero-based. Explicit legacy-floor runs return empty/`None` matched counts.
 
 Moment projection does not necessarily preserve the normalized conditional
@@ -115,6 +117,11 @@ raises an error suggesting more nodes. Python's optional keyword `method="even"`
 selects this same corrected construction. The former `coverage` and exponential
 grid interface has been retired; it no longer routes to the incorrect historical
 conditional-variance formula.
+
+Both languages evaluate the CIR density in log space, using scaled Bessel
+functions with a positive log-series fallback when the Bessel function itself
+underflows. Zero noncentrality uses the central Gamma limit. This also protects
+transition construction at long observation gaps and low stationary variance.
 
 `discretization.discreteOU(kappa,sigma,Delta,gridOrN)` and
 `discrete_ou(mean_reversion,volatility,step,grid_or_count)` discretize the centered
@@ -160,6 +167,9 @@ innovation mean is zero. Otherwise the unconditional mean is
 `mu + sum(pC.*muC)/(1-sum(A))`. Component means need not individually be zero.
 Optional quadrature methods use the same floor-free stabilization and
 sequential matching rules, and also return diagnostics.
+Their reference-density corrections use nodes relative to the AR location,
+so changing that location only translates the grid and leaves transitions
+unchanged. This applies to Hermite and mixture Gaussian quadrature as well.
 
 ## Python names
 

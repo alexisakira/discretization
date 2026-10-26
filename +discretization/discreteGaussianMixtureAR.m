@@ -150,10 +150,10 @@ for row = 1:stateCount
     % Standardized mixture densities avoid cancellation and preserve units.
     logPrior = log(W)+gaussianMixtureLogDensity(z,pC,componentMeans,componentSDs)';
     if strcmp(method,'gauss-hermite')
-        logPrior = logPrior-(-.5*(X1/innovationSD).^2-.5*log(2*pi));
+        logPrior = logPrior-(-.5*((X1-mu)/innovationSD).^2-.5*log(2*pi));
     elseif strcmp(method,'GMQ')
         logPrior = logPrior-gaussianMixtureLogDensity( ...
-            (X1-innovationMean)/innovationSD,pC,componentMeans,componentSDs)';
+            (X1-mu-innovationMean)/innovationSD,pC,componentMeans,componentSDs)';
     end
     prior = relativeReferenceWeights(logPrior);
     powers = z.^((1:4)');

@@ -529,9 +529,11 @@ def discrete_gaussian_mixture_ar(
         if not legacy:
             log_prior = np.log(integration_weights) + log_density(centered_grid)
             if normalized_method == "gauss_hermite":
-                log_prior -= norm.logpdf(one_dimensional_grid, scale=innovation_std)
+                log_prior -= norm.logpdf(
+                    one_dimensional_grid - mean, scale=innovation_std
+                )
             elif normalized_method == "gaussian_mixture":
-                log_prior -= log_density(one_dimensional_grid)
+                log_prior -= log_density(one_dimensional_grid - mean)
             weights = relative_weights(log_prior)
             z = (centered_grid - center) / innovation_std
             powers = z[None, :] ** np.arange(1, 5)[:, None]
@@ -708,7 +710,7 @@ def discrete_stochastic_volatility_ar(
         / (1 - persistence**2)
     )
 
-    volatility_transition, volatility_grid_matrix = discrete_var(
+    volatility_result = discrete_var(
         [log_variance_mean * (1 - volatility_persistence)],
         [[volatility_persistence]],
         [[volatility_innovation_std**2]],
@@ -716,7 +718,9 @@ def discrete_stochastic_volatility_ar(
         moment_count=2,
         method=normalized_method,
         probability_floor=probability_floor,
+        return_diagnostics=return_diagnostics and not validate_floor(probability_floor),
     )
+    volatility_transition, volatility_grid_matrix = volatility_result[:2]
     volatility_grid = volatility_grid_matrix.reshape(-1)
     state_grid_1d = np.linspace(
         -grid_width * unconditional_state_std,
@@ -743,11 +747,6 @@ def discrete_stochastic_volatility_ar(
             + volatility_persistence * joint_grid[1, row]
             + volatility_innovation_std**2 / 2
         )
-        prior = norm.pdf(
-            state_grid_1d,
-            loc=conditional_mean,
-            scale=math.sqrt(conditional_variance),
-        )
         if not legacy:
             z = (state_grid_1d - conditional_mean) / math.sqrt(conditional_variance)
             powers = np.vstack((z, z**2))
@@ -763,6 +762,11 @@ def discrete_stochastic_volatility_ar(
                 probability, volatility_transition[row % volatility_state_count]
             )
             continue
+        prior = norm.pdf(
+            state_grid_1d,
+            loc=conditional_mean,
+            scale=math.sqrt(conditional_variance),
+        )
         prior = np.maximum(prior, probability_floor)
 
         def moments(values: FloatArray) -> FloatArray:
@@ -805,6 +809,8 @@ def discrete_stochastic_volatility_ar(
             if legacy
             else diagnostics(2, matched, errors)
         )
+        if not legacy:
+            info["volatility"] = volatility_result[2]
         return transition, joint_grid, info
     return transition, joint_grid
 
