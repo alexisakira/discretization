@@ -16,8 +16,6 @@ mixture = {[.1628,.8372],[-.0039,.0008],[.1293,.0300]};
 [f.svTransition,f.svGrid] = discretization.discreteStochasticVolatilityAR(.95,.9,.007,.06,9,5);
 [f.cirTransition,f.cirGrid] = discretization.discreteCIR(-log(.58),.028,.1,.25,9);
 [f.ouTransition,f.ouGrid] = discretization.discreteOU(.7,.3,.25,21);
-[f.jumpTransition,f.jumpGrid,f.jumpInfo] = ...
-    discretization.discreteOUAsymmetricLaplaceJumps(.7,.3,.1,2.7,1.05,.25,21);
 f.matlabVersion = version;
 f.matlabRelease = version('-release');
 f.packageVersion = '0.2.0';

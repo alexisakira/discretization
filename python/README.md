@@ -112,7 +112,8 @@ the 0.1.0 process algorithms. The option floors reference weights before moment
 matching; final transition probabilities need not exceed the floor. See
 [API.md](../API.md) for diagnostics, fallback rules and examples.
 
-Both languages now include Gaussian OU, OU with aggregate asymmetric-Laplace
-jumps, and the CIR rewrite with an automatically selected feasible even grid.
+Both languages include Gaussian OU and the CIR rewrite with an
+automatically selected feasible even grid. All default process routines use
+the same moment-matching conventions and conditional-standard-deviation scaling.
 New defaults are checked against MATLAB R2026a fixtures; historical R2024b
 fixtures remain available for legacy regression tests.

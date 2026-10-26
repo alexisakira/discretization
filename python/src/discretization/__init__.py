@@ -8,7 +8,6 @@ from .markov import (
     discrete_ar,
     discrete_cir,
     discrete_ou,
-    discrete_ou_asymmetric_laplace_jumps,
 )
 from .maxent import (
     entropy_objective,
@@ -35,7 +34,6 @@ __all__ = [
     "discrete_ar",
     "discrete_cir",
     "discrete_ou",
-    "discrete_ou_asymmetric_laplace_jumps",
     "discrete_gaussian_mixture_ar",
     "discrete_stochastic_volatility_ar",
     "discrete_var",

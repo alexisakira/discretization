@@ -12,6 +12,7 @@ from scipy.special import logsumexp
 from scipy.stats import norm
 
 from ._matching import (
+    ProcessResult,
     diagnostics,
     normal_interval_log_probability,
     relative_weights,
@@ -40,7 +41,7 @@ def discrete_var(
     *,
     probability_floor: float | None = None,
     return_diagnostics: bool = False,
-) -> tuple[FloatArray, FloatArray]:
+) -> ProcessResult:
     """Discretize a Gaussian VAR(1) process.
 
     ``state_count`` is the number of grid points in each dimension. The
@@ -329,7 +330,7 @@ def discrete_gaussian_mixture_ar(
     *,
     probability_floor: float | None = None,
     return_diagnostics: bool = False,
-) -> tuple[FloatArray, FloatArray]:
+) -> ProcessResult:
     """Discretize an AR(p) process with Gaussian-mixture innovations."""
     coefficients = np.asarray(ar_coefficients, dtype=float).reshape(-1)
     probabilities = np.asarray(mixture_probabilities, dtype=float).reshape(-1)
@@ -380,22 +381,36 @@ def discrete_gaussian_mixture_ar(
     if spectral_radius >= 1:
         raise ValueError("ar_coefficients must define a stationary process")
 
-    component_variances = component_std**2
-    innovation_moments = np.array(
-        [
-            probabilities @ component_means,
-            probabilities @ (component_means**2 + component_variances),
-            probabilities
-            @ (component_means**3 + 3 * component_means * component_variances),
-            probabilities
-            @ (
-                component_means**4
-                + 6 * component_means**2 * component_variances
-                + 3 * component_variances**2
-            ),
-        ]
-    )
-    innovation_std = math.sqrt(innovation_moments[1] - innovation_moments[0] ** 2)
+    if legacy:
+        component_variances = component_std**2
+        innovation_moments = np.array(
+            [
+                probabilities @ component_means,
+                probabilities @ (component_means**2 + component_variances),
+                probabilities
+                @ (component_means**3 + 3 * component_means * component_variances),
+                probabilities
+                @ (
+                    component_means**4
+                    + 6 * component_means**2 * component_variances
+                    + 3 * component_variances**2
+                ),
+            ]
+        )
+        innovation_std = math.sqrt(innovation_moments[1] - innovation_moments[0] ** 2)
+    else:
+        active = probabilities > 0
+        probabilities = probabilities[active]
+        component_means = component_means[active]
+        component_std = component_std[active]
+        center = probabilities @ component_means
+        innovation_std = math.sqrt(
+            probabilities @ (component_std**2 + (component_means - center) ** 2)
+        )
+        if not np.isfinite(innovation_std) or innovation_std <= 0:
+            raise ValueError(
+                "innovation standard deviation must be finite and positive"
+            )
     basis = np.zeros(order**2)
     basis[0] = 1
     inverse_first_column = np.linalg.solve(
@@ -478,7 +493,7 @@ def discrete_gaussian_mixture_ar(
         component_means[active],
         component_std[active],
     )
-    center = innovation_moments[0]
+    center = innovation_moments[0] if legacy else center
     cm = means - center
     central_targets = np.array(
         [
@@ -496,14 +511,15 @@ def discrete_gaussian_mixture_ar(
         )
 
     reference_pdf: FloatArray | None = None
-    if normalized_method == "gauss_hermite":
-        reference_pdf = norm.pdf(
-            one_dimensional_grid,
-            loc=0,
-            scale=innovation_std,
-        )
-    elif normalized_method == "gaussian_mixture":
-        reference_pdf = mixture_pdf(one_dimensional_grid)
+    if legacy:
+        if normalized_method == "gauss_hermite":
+            reference_pdf = norm.pdf(
+                one_dimensional_grid,
+                loc=0,
+                scale=innovation_std,
+            )
+        elif normalized_method == "gaussian_mixture":
+            reference_pdf = mixture_pdf(one_dimensional_grid)
 
     for row in range(total_state_count):
         conditional_mean = (
@@ -627,6 +643,20 @@ def discrete_gaussian_mixture_ar(
             if legacy
             else diagnostics(moment_count, matched, errors)
         )
+        if not legacy:
+            info.update(
+                innovation_mean=float(center),
+                innovation_sd=innovation_std,
+                unconditional_mean=mean + float(center) / (1 - coefficients.sum()),
+                stationary_sd=unconditional_std,
+                grid_half_width_sd=grid_width,
+            )
+            if normalized_method == "even":
+                spacing = one_dimensional_grid[1] - one_dimensional_grid[0]
+                info.update(
+                    grid_spacing=spacing,
+                    spacing_to_smallest_component_sd=spacing / component_std.min(),
+                )
         return transition, state_grid, info
     return transition, state_grid
 
@@ -643,7 +673,7 @@ def discrete_stochastic_volatility_ar(
     *,
     probability_floor: float | None = None,
     return_diagnostics: bool = False,
-) -> tuple[FloatArray, FloatArray]:
+) -> ProcessResult:
     """Discretize an AR(1) process with log AR(1) stochastic volatility."""
     _validate_state_count(state_count)
     _validate_state_count(volatility_state_count)

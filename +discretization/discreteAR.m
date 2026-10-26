@@ -1,7 +1,4 @@
 function [P,X,diagnostics] = discreteAR(mu,rho,sigma,Nm,varargin)
-[options,floorValue] = processOptions(varargin,{'even',2,[]});
-[method,nMoments,nSigmas] = options{:};
-
 %DISCRETEAR Discretize a Gaussian AR(1) process.
 %   [P,X] = discretization.discreteAR(...
 %       mu,rho,sigma,Nm,method,nMoments,nSigmas)
@@ -12,6 +9,14 @@ function [P,X,diagnostics] = discreteAR(mu,rho,sigma,Nm,varargin)
 % Append 'ProbabilityFloor',1e-8 for the 0.1.0 algorithm (default: 0).
 % The third output reports matched moments and standardized errors by row.
 
+[options,floorValue] = processOptions(varargin,{'even',2,[]});
+[method,nMoments,nSigmas] = options{:};
+
+validateattributes(mu,{'numeric'},{'real','finite','scalar'},mfilename,'mu',1)
+validateattributes(rho,{'numeric'},{'real','finite','scalar','>',-1,'<',1},mfilename,'rho',2)
+validateattributes(sigma,{'numeric'},{'real','finite','scalar','positive'},mfilename,'sigma',3)
+validateattributes(Nm,{'numeric'},{'real','finite','scalar','integer','>=',3},mfilename,'Nm',4)
+method = validatestring(method,{'even','gauss-legendre','clenshaw-curtis','gauss-hermite'});
 % define grid spacing parameter if not provided
 if isempty(nSigmas)
     if abs(rho) <= 1-2/(Nm-1)
@@ -31,6 +36,7 @@ if ~isnumeric(nMoments) || nMoments < 1 || nMoments > 4 || ~((rem(nMoments,1) ==
     error('nMoments must be either 1, 2, 3, 4')
 end
 
+validateattributes(nSigmas,{'numeric'},{'real','finite','scalar','positive'},mfilename,'nSigmas')
 sigmaX = sigma/sqrt(1-rho^2); % unconditional standard deviation
 
 switch method

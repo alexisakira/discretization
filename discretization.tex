@@ -489,12 +489,13 @@ P, grid = discrete_cir(
 \end{lstlisting}
 Both languages automatically select an evenly spaced grid that satisfies
 the sufficient conditions for matching the first two conditional moments and
-maximizes stationary coverage within the feasible set. Python retains its old
-grid construction only when coverage or method is supplied explicitly. The density
+maximizes stationary coverage within the feasible set. Python also accepts
+\code{method="even"} to select this corrected construction explicitly; the
+former coverage and exponential-grid interface has been retired. The density
 itself is available through \code{cirTransitionDensity} and
 \code{cir\_transition\_density}.
 
-\subsection{Ornstein--Uhlenbeck processes}
+\subsection{Ornstein--Uhlenbeck process}
 
 The centered Gaussian OU construction matches the exact conditional mean and
 variance of $\diff X_t=-\kappa X_t\diff t+\sigma\diff W_t$. With
@@ -503,24 +504,14 @@ $\pm\omega\sqrt{N-1}$. A fixed increasing grid can instead be supplied;
 infeasible two-moment grids raise an error before optimization of any row.
 \begin{lstlisting}[language=Matlab]
 [P,X] = discretization.discreteOU(.7,.3,.25,21);
-[PJ,XJ,info] = discretization.discreteOUAsymmetricLaplaceJumps( ...
-    .7,.3,.1,2.7,1.05,.25,21);
 \end{lstlisting}
 \begin{lstlisting}[language=Python]
 P, grid = discrete_ou(.7, .3, .25, 21)
-PJ, grid_j = discrete_ou_asymmetric_laplace_jumps(
-    .7, .3, .1, 2.7, 1.05, .25, 21)
 \end{lstlisting}
-The jump routine uses a centered geometric aggregate of asymmetric-Laplace
-jumps at the end of each step. With $q=\exp(-\lambda\Delta)$, the count law
-is $\Pr(M=m)=q(1-q)^m$. Conditional on a positive count, aggregate rates satisfy
-$a_\Delta b_\Delta=q ab$ and $a_\Delta-b_\Delta=a-b$. The Gaussian-plus-jump
-reference density is evaluated in log space, and both conditional moments
-are matched. Zero intensity recovers Gaussian OU. At finite step size this is
-a splitting approximation to compensated compound-Poisson OU; decrease
-$\Delta$ to check timing error and use powers of the matrix for longer horizons.
-The third MATLAB output, or Python \code{return\_diagnostics=True}, reports
-step parameters and conditional variance. See \code{API.md} for signatures.
+Both implementations use conditional-innovation-standard-deviation scaling
+and the shared sequential matcher described below, with residual acceptance
+tolerance $10^{-7}$. Both moments are required; a numerical failure raises an
+error. The grid choice and its historical width are unchanged.
 
 \section{Distribution and quadrature routines}
 
@@ -668,7 +659,9 @@ The default matcher proceeds sequentially from the mean upward and retains
 the highest successful count. Centered standardized nodes $z$ must satisfy
 $\min z<0<\max z$ for strict mean feasibility and
 $-\min z\max z\geq 1$ for unit variance; a convex-hull check also enforces
-grid-spacing and higher-moment restrictions. An infeasible or numerically
+grid-spacing and higher-moment restrictions. The first two moments use
+exact minimum and maximum variance bounds on the grid, while higher moments
+use the generic convex-hull check. An infeasible or numerically
 failed mean match gives a point mass nearest the conditional mean and a count
 of zero. A higher-moment failure retains the preceding match. Near a truncated
 boundary, exact moments require tilting the normalized Gaussian density.

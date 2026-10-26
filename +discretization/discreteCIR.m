@@ -88,8 +88,6 @@ end
 
 %% Construct the transition matrix
 P = NaN(N);
-scalingFactor = X(end);
-momentErrorTolerance = 1e-7;
 
 for ii = 1:N
     x = X(ii);
@@ -100,18 +98,11 @@ for ii = 1:N
     % normalization, so the prior is proportional to the transition density.
     q = relativeReferenceWeights(cirLogDensity(X,x,kappa,mu,sigma,Delta));
 
-    momentFunction = @(state) [ ...
-        (state-condMean)./scalingFactor; ...
-        ((state-condMean)./scalingFactor).^2];
-    targetMoments = [0;condVar/scalingFactor^2];
-
-    [probability,~,momentError] = maximumEntropyWeightsCore( ...
-        X,momentFunction,targetMoments,q,zeros(2,1));
-    if any(~isfinite(probability)) || ...
-            norm(momentError,Inf) > momentErrorTolerance
+    z = (X-condMean)/sqrt(condVar);
+    [probability,matched] = sequentialMomentMatch(X,[z;z.^2],[0;1],q,2,1e-7);
+    if matched ~= 2
         error('discretization:discreteCIR:MomentMatchingFailure', ...
-            ['Two-moment matching failed numerically in row %d even ', ...
-            'though the selected grid is theoretically feasible.'],ii)
+            'Two-moment matching failed in transition row %d.',ii)
     end
     P(ii,:) = probability;
 end

@@ -7,10 +7,15 @@ import warnings
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy.special import log_ndtr
-from scipy.stats import gamma, ncx2
+from scipy.stats import ncx2
 
-from ._matching import diagnostics, relative_weights, sequential_match, validate_floor
+from ._matching import (
+    ProcessResult,
+    diagnostics,
+    relative_weights,
+    sequential_match,
+    validate_floor,
+)
 from .maxent import maximum_entropy_weights
 
 FloatArray = NDArray[np.float64]
@@ -52,24 +57,17 @@ def discrete_cir(
     volatility: float,
     step: float,
     state_count: int,
-    coverage: float | None = None,
-    method: str | None = None,
+    *,
+    method: str = "even",
 ) -> tuple[FloatArray, FloatArray]:
-    """CIR on an automatically selected, strictly two-moment-feasible grid.
+    """CIR on the same automatically selected feasible even grid as MATLAB.
 
-    The Feller condition is required. Explicit ``coverage`` or ``method``
-    selects the historical quantile-endpoint construction for compatibility.
-    The default agrees with MATLAB's rewritten ``discreteCIR``.
+    ``method="even"`` explicitly selects that same corrected construction.
+    The historical coverage/exponential grid interface has been retired.
     """
-    if coverage is not None or method is not None:
-        return _legacy_discrete_cir(
-            mean_reversion,
-            long_run_mean,
-            volatility,
-            step,
-            state_count,
-            0.999 if coverage is None else coverage,
-            "exponential" if method is None else method,
+    if method != "even":
+        raise ValueError(
+            "CIR supports only method='even' with automatic feasible grid selection"
         )
     _validate_cir_model(mean_reversion, long_run_mean, volatility, step)
     if not isinstance(state_count, (int, np.integer)) or state_count < 3:
@@ -158,7 +156,9 @@ def _ou_grid_and_weights(grid_or_count, stationary_sd):
             grid_or_count,
         )
     else:
-        grid = np.asarray(grid_or_count, dtype=float).reshape(-1)
+        grid = np.asarray(grid_or_count, dtype=float)
+        if grid.ndim != 1:
+            raise ValueError("grid must be a one-dimensional vector")
         if grid.size < 3 or not np.isfinite(grid).all() or np.any(np.diff(grid) <= 0):
             raise ValueError(
                 "grid must contain at least three finite, increasing points"
@@ -208,174 +208,6 @@ def discrete_ou(
     return transition, grid
 
 
-def discrete_ou_asymmetric_laplace_jumps(
-    mean_reversion: float,
-    volatility: float,
-    jump_intensity: float,
-    upper_rate: float,
-    lower_rate: float,
-    step: float,
-    grid_or_count: ArrayLike,
-    *,
-    return_diagnostics: bool = False,
-):
-    """OU with centered geometric aggregate asymmetric-Laplace jumps.
-
-    This is the same finite-step splitting model as MATLAB, not the exact
-    continuous-time jump-OU semigroup. Use smaller steps and matrix powers.
-    """
-    if any(
-        not np.isfinite(v) or v <= 0
-        for v in (mean_reversion, volatility, upper_rate, lower_rate, step)
-    ):
-        raise ValueError("model scales and step must be finite and positive")
-    if not np.isfinite(jump_intensity) or jump_intensity < 0:
-        raise ValueError("jump_intensity must be finite and nonnegative")
-    rho = math.exp(-mean_reversion * step)
-    decay = -math.expm1(-2 * mean_reversion * step)
-    gaussian_variance = volatility**2 / (2 * mean_reversion) * decay
-    s = math.sqrt(gaussian_variance)
-    q = math.exp(-jump_intensity * step)
-    p = -math.expm1(-jump_intensity * step)
-    if q == 0:
-        raise ValueError("step too large to retain a positive no-jump probability")
-    difference, product = upper_rate - lower_rate, q * upper_rate * lower_rate
-    discriminant = math.hypot(difference, 2 * math.sqrt(product))
-    if difference >= 0:
-        a = 0.5 * (discriminant + difference)
-        b = product / a
-    else:
-        b = 0.5 * (discriminant - difference)
-        a = product / b
-    jump_mean, jump_variance = 1 / a - 1 / b, 1 / a**2 + 1 / b**2
-    variance = gaussian_variance + p * jump_variance + p * q * jump_mean**2
-    stationary_sd = math.sqrt(variance / decay)
-    grid, weights = _ou_grid_and_weights(grid_or_count, stationary_sd)
-    _strict_two_moment_grid(grid, rho, variance)
-    transition = np.empty((grid.size, grid.size))
-    for row, mean in enumerate(rho * grid):
-        z = grid - mean + p * jump_mean
-        log_gaussian = -0.5 * math.log(2 * math.pi) - math.log(s) - 0.5 * (z / s) ** 2
-        if p > 0:
-            right = -a * z + 0.5 * (a * s) ** 2 + log_ndtr(z / s - a * s)
-            left = b * z + 0.5 * (b * s) ** 2 + log_ndtr(-z / s - b * s)
-            log_jump = (
-                math.log(a) + math.log(b) - math.log(a + b) + np.logaddexp(right, left)
-            )
-            log_density = np.logaddexp(
-                math.log(q) + log_gaussian, math.log(p) + log_jump
-            )
-        else:
-            log_density = log_gaussian
-        standardized = (grid - mean) / math.sqrt(variance)
-        prior = relative_weights(np.log(weights) + log_density)
-        probability, matched = sequential_match(
-            grid,
-            np.vstack((standardized, standardized**2)),
-            np.array([0.0, 1.0]),
-            prior,
-            2,
-        )
-        if matched != 2:
-            raise RuntimeError("two-moment jump-OU matching failed")
-        transition[row] = probability
-    if return_diagnostics:
-        return (
-            transition,
-            grid,
-            dict(
-                rho=rho,
-                no_jump_probability=q,
-                jump_probability=p,
-                aggregate_upper_rate=a,
-                aggregate_lower_rate=b,
-                conditional_variance=variance,
-                stationary_sd=stationary_sd,
-            ),
-        )
-    return transition, grid
-
-
-def _legacy_discrete_cir(
-    mean_reversion: float,
-    long_run_mean: float,
-    volatility: float,
-    step: float,
-    state_count: int,
-    coverage: float = 0.999,
-    method: str = "exponential",
-) -> tuple[FloatArray, FloatArray]:
-    """Discretize a Cox-Ingersoll-Ross process."""
-    _validate_cir_model(mean_reversion, long_run_mean, volatility, step)
-    if not isinstance(state_count, (int, np.integer)) or state_count < 2:
-        raise ValueError("state_count must be an integer of at least two")
-    if not 0 < coverage < 1:
-        raise ValueError("coverage must lie strictly between zero and one")
-    if method not in {"even", "exponential"}:
-        raise ValueError("method must be 'even' or 'exponential'")
-
-    shape = 2 * mean_reversion * long_run_mean / volatility**2
-    rate = 2 * mean_reversion / volatility**2
-    tail = (1 - coverage) / 2
-    endpoints = gamma.ppf([tail, 1 - tail], a=shape, scale=1 / rate)
-    if method == "even":
-        grid = np.linspace(endpoints[0], endpoints[1], state_count)
-        integration_weights = np.ones(state_count)
-    else:
-        grid = np.geomspace(endpoints[0], endpoints[1], state_count)
-        integration_weights = grid.copy()
-    integration_weights /= integration_weights.sum()
-
-    transition = np.empty((state_count, state_count))
-    scaling = float(np.max(np.abs(grid)))
-    decay = math.exp(-mean_reversion * step)
-
-    for row, current_state in enumerate(grid):
-        conditional_mean = current_state * decay + long_run_mean * (1 - decay)
-        conditional_variance = (
-            volatility**2
-            / mean_reversion
-            * (1 - decay)
-            * (current_state * decay + long_run_mean / 2)
-        )
-        prior = integration_weights * cir_transition_density(
-            grid,
-            float(current_state),
-            mean_reversion,
-            long_run_mean,
-            volatility,
-            step,
-        )
-
-        def two_moments(values: FloatArray) -> FloatArray:
-            centered = (values - conditional_mean) / scaling
-            return np.vstack((centered, centered**2))
-
-        probability, _, moment_error = maximum_entropy_weights(
-            grid,
-            two_moments,
-            [0.0, conditional_variance / scaling**2],
-            prior,
-            np.zeros(2),
-        )
-        if np.linalg.norm(moment_error) > 1e-5:
-            warnings.warn(
-                "Failed to match two CIR moments; matching the mean only.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            probability, _, _ = maximum_entropy_weights(
-                grid,
-                lambda values: (values - conditional_mean)[None, :] / scaling,
-                [0.0],
-                prior,
-                [0.0],
-            )
-        transition[row] = probability
-
-    return transition, grid
-
-
 def discrete_ar(
     mean: float,
     persistence: float,
@@ -387,7 +219,7 @@ def discrete_ar(
     *,
     probability_floor: float | None = None,
     return_diagnostics: bool = False,
-) -> tuple[FloatArray, FloatArray]:
+) -> ProcessResult:
     """Discretize a Gaussian AR(1) process.
 
     The Python implementation currently supports the evenly spaced grid used
@@ -403,9 +235,11 @@ def discrete_ar(
         raise ValueError("state_count must be an integer of at least three")
     if moment_count not in (1, 2, 3, 4):
         raise ValueError("moment_count must be one of 1, 2, 3, or 4")
-    if innovation_std <= 0:
+    if not np.isfinite(mean):
+        raise ValueError("mean must be finite")
+    if not np.isfinite(innovation_std) or innovation_std <= 0:
         raise ValueError("innovation_std must be positive")
-    if abs(persistence) >= 1:
+    if not np.isfinite(persistence) or abs(persistence) >= 1:
         raise ValueError("persistence must have absolute value below one")
 
     if grid_width is None:
@@ -415,6 +249,8 @@ def discrete_ar(
         else:
             grid_width = math.sqrt(state_count - 1)
 
+    if not np.isfinite(grid_width) or grid_width <= 0:
+        raise ValueError("grid_width must be finite and positive")
     unconditional_std = innovation_std / math.sqrt(1 - persistence**2)
     grid = np.linspace(
         mean - grid_width * unconditional_std,

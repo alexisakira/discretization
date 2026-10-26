@@ -100,77 +100,62 @@ if floorValue > 0
     diagnostics = struct('probabilityFloor',floorValue,'matchedMoments',[]);
     return
 end
-diagnostics = [];
-if strcmp(method,'even')
-    [P,X,diagnostics] = discreteGaussianMixtureAREven( ...
-        mu,A,pC,muC,sigmaC,Nm,nMoments,nSigmas,F);
-    return
+active = pC > 0;
+pC = pC(active); muC = muC(active); sigmaC = sigmaC(active);
+innovationMean = pC'*muC;
+innovationVariance = pC'*(sigmaC.^2+(muC-innovationMean).^2);
+innovationSD = sqrt(innovationVariance);
+if ~isfinite(innovationSD) || innovationSD <= 0
+    error('discretization:discreteGaussianMixtureAR:InvalidScale', ...
+        'The innovation standard deviation must be finite and positive.')
 end
-
-% Optional quadrature methods use the same log-weight and sequential matching rules.
-sigmaC2 = sigmaC.^2;
-T1 = pC'*muC; % mean
-T2 = pC'*(muC.^2+sigmaC2); % uncentered second moment
-T3 = pC'*(muC.^3+3*muC.*sigmaC2); % uncentered third moment
-T4 = pC'*(muC.^4+6*(muC.^2).*sigmaC2+3*sigmaC2.^2); % uncentered fourth moment
-
-TBar = [T1 T2 T3 T4]';
-
-mixturePDF = @(values) sum(normpdf(values,muC',sigmaC').*pC',2);
-
-sigma = sqrt(T2-T1^2); % conditional standard deviation
-firstBasisVector = [1;zeros(K^2-1,1)];
-inverseFirstColumn = (eye(K^2)-kron(F,F))\firstBasisVector;
-sigmaX = sigma*sqrt(inverseFirstColumn(1)); % unconditional standard deviation
-
-% construct the one dimensional grid
+basis = zeros(K^2,1); basis(1) = 1;
+stationaryCovariance = (eye(K^2)-kron(F,F))\basis;
+stationarySD = innovationSD*sqrt(stationaryCovariance(1));
+limit = nSigmas*stationarySD;
 switch method
-    case 'even' % evenly-spaced grid
-        X1 = linspace(mu-nSigmas*sigmaX,mu+nSigmas*sigmaX,Nm);
+    case 'even'
+        X1 = linspace(mu-limit,mu+limit,Nm);
         W = ones(1,Nm);
-    case 'gauss-legendre' % Gauss-Legendre quadrature
-        [X1,W] = legpts(Nm,[mu-nSigmas*sigmaX,mu+nSigmas*sigmaX]);
-        X1 = X1';
-    case 'clenshaw-curtis' % Clenshaw-Curtis quadrature
-        [X1,W] = fclencurt(Nm,mu-nSigmas*sigmaX,mu+nSigmas*sigmaX);
-        X1 = fliplr(X1');
-        W = fliplr(W');
-    case 'gauss-hermite' % Gauss-Hermite quadrature
-        if rho > 0.8
-            warning('Model is persistent; even-spaced grid is recommended')
-        end
+    case 'gauss-legendre'
+        [X1,W] = legpts(Nm,[mu-limit,mu+limit]); X1 = X1';
+    case 'clenshaw-curtis'
+        [X1,W] = fclencurt(Nm,mu-limit,mu+limit);
+        X1 = fliplr(X1'); W = fliplr(W');
+    case 'gauss-hermite'
         [X1,W] = GaussHermite(Nm);
-        X1 = mu+sqrt(2)*sigma*X1';
-        W = W'./sqrt(pi);
-    case 'GMQ' % Gaussian Mixture Quadrature
-        if rho > 0.8
-            warning('Model is persistent; even-spaced grid is recommended')
-        end
+        X1 = mu+sqrt(2)*innovationSD*X1'; W = W'/sqrt(pi);
+    case 'GMQ'
         [X1,W] = discretization.gaussianMixtureQuadrature(pC,muC,sigmaC,Nm);
-        X1 = X1 + mu;
+        X1 = X1+mu;
 end
-
-X = allcomb2(ones(K,1)*X1)'; % K*Nm^K matrix of grid points
-
-stateCount = Nm^K;
-lagStateCount = Nm^(K-1);
-P = zeros(stateCount); % transition probability matrix
-matched = zeros(stateCount,1);
-errors = zeros(stateCount,4);
-innovationMean = T1;
-centralMeans = muC-innovationMean;
-targets = [0;1;pC'*(centralMeans.^3+3*centralMeans.*sigmaC2)/sigma^3; ...
-    pC'*(centralMeans.^4+6*centralMeans.^2.*sigmaC2+3*sigmaC2.^2)/sigma^4];
+if ~isfinite(limit) || limit <= 0 || any(~isfinite(X1)) || any(diff(X1) <= 0)
+    error('discretization:discreteGaussianMixtureAR:InvalidGrid', ...
+        'The grid must have finite, distinct, increasing points.')
+end
+if ismember(method,{'gauss-hermite','GMQ'}) && rho > .8
+    warning('Model is persistent; even-spaced grid is recommended')
+end
+X = allcomb2(ones(K,1)*X1)';
+stateCount = Nm^K; lagStateCount = Nm^(K-1);
+P = zeros(stateCount);
+componentMeans = (muC-innovationMean)/innovationSD;
+componentSDs = sigmaC/innovationSD;
+targets = [0;1;pC'*(componentMeans.^3+3*componentMeans.*componentSDs.^2); ...
+    pC'*(componentMeans.^4+6*componentMeans.^2.*componentSDs.^2+3*componentSDs.^4)];
+matched = zeros(stateCount,1); errors = zeros(stateCount,4);
 for row = 1:stateCount
     baseMean = mu*(1-sum(A))+A*X(:,row);
-    logPrior = log(W)+gaussianMixtureLogDensity(X1-baseMean,pC,muC,sigmaC)';
+    z = (X1-baseMean-innovationMean)/innovationSD;
+    % Standardized mixture densities avoid cancellation and preserve units.
+    logPrior = log(W)+gaussianMixtureLogDensity(z,pC,componentMeans,componentSDs)';
     if strcmp(method,'gauss-hermite')
-        logPrior = logPrior-(-0.5*(X1/sigma).^2-log(sigma)-0.5*log(2*pi));
+        logPrior = logPrior-(-.5*(X1/innovationSD).^2-.5*log(2*pi));
     elseif strcmp(method,'GMQ')
-        logPrior = logPrior-gaussianMixtureLogDensity(X1,pC,muC,sigmaC)';
+        logPrior = logPrior-gaussianMixtureLogDensity( ...
+            (X1-innovationMean)/innovationSD,pC,componentMeans,componentSDs)';
     end
     prior = relativeReferenceWeights(logPrior);
-    z = (X1-baseMean-innovationMean)/sigma;
     powers = z.^((1:4)');
     [probability,matched(row)] = sequentialMomentMatch(X1,powers,targets,prior,nMoments,1e-7);
     errors(row,:) = (powers*probability'-targets)';
@@ -179,5 +164,18 @@ for row = 1:stateCount
 end
 diagnostics = struct('requestedMoments',nMoments,'matchedMoments',matched, ...
     'standardizedMomentErrors',errors,'momentTolerance',1e-7, ...
-    'downgradedRows',find(matched < nMoments),'probabilityFloor',0);
+    'downgradedRows',find(matched < nMoments),'probabilityFloor',0, ...
+    'innovationMean',innovationMean,'innovationSD',innovationSD, ...
+    'unconditionalMean',mu+innovationMean/(1-sum(A)), ...
+    'stationarySD',stationarySD,'gridHalfWidthSD',nSigmas);
+if strcmp(method,'even')
+    diagnostics.gridSpacing = X1(2)-X1(1);
+    diagnostics.spacingToSmallestComponentSD = diagnostics.gridSpacing/min(sigmaC);
+end
+if ~isempty(diagnostics.downgradedRows)
+    warning('discretization:discreteGaussianMixtureAR:MomentFallback', ...
+        ['Matched fewer than %d moments in %d of %d transition rows. ' ...
+        'Inspect diagnostics and adjust grid width or resolution.'], ...
+        nMoments,numel(diagnostics.downgradedRows),stateCount)
+end
 end

@@ -70,35 +70,21 @@ for row = 1:N
 end
 
 P = NaN(N);
-lambda0 = zeros(2,1);
 for row = 1:N
     conditionalMean = rho*X(row);
 
     logPrior = log(quadratureWeight) ...
         -0.5*((X-conditionalMean)/conditionalSD).^2;
-    if ~any(isfinite(logPrior))
-        error('discretization:discreteOU:InvalidPrior', ...
-            'The Gaussian prior underflowed in transition row %d.',row)
-    end
-    prior = exp(logPrior-max(logPrior));
-    prior = max(prior,realmin);
-    prior = prior/sum(prior);
-
-    momentFunction = @(state) [ ...
-        (state-conditionalMean)/omega; ...
-        ((state-conditionalMean)/omega).^2];
-    targetMoments = [0;conditionalVariance/omega^2];
-    [probability,lambda0,momentError] = maximumEntropyWeightsCore( ...
-        X,momentFunction,targetMoments,prior,lambda0);
-    if any(~isfinite(probability)) || norm(momentError,Inf) > 1e-7
+    prior = relativeReferenceWeights(logPrior);
+    z = (X-conditionalMean)/conditionalSD;
+    [probability,matched] = sequentialMomentMatch(X,[z;z.^2],[0;1],prior,2,1e-7);
+    if matched ~= 2
         error('discretization:discreteOU:MomentMatchingFailure', ...
             'Two-moment matching failed in transition row %d.',row)
     end
     P(row,:) = probability;
 end
 
-P = max(P,0);
-P = P./sum(P,2);
 
 end
 

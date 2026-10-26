@@ -23,11 +23,20 @@ All notable changes to this project will be documented in this file.
   innovation means, higher-order lag structure, and infeasible-row fallbacks.
 - Include the CIR rewrite with an automatically selected strictly feasible even
   grid and corrected exact conditional variance. Python now uses the same default;
-  its explicit `coverage` / `method` arguments retain the historical construction.
-- Add centered Gaussian OU and OU with geometric aggregate asymmetric-Laplace
-  jumps in MATLAB and Python. Both support an automatic or fixed grid and reject
-  infeasible two-moment grids. The jump routine is a finite-step splitting model;
-  smaller steps approximate continuous jump timing.
+  explicit `method="even"` selects the same corrected construction. Retire the
+  old Python coverage/exponential interface and its incorrect variance formula.
+- Add centered Gaussian OU in MATLAB and Python, with automatic or fixed grids
+  and explicit rejection of infeasible two-moment grids. Remove the unused
+  jump-OU development feature from the release.
+- Consolidate all MATLAB Gaussian-mixture AR grid methods into one transition
+  implementation with consistent diagnostics and warnings. Use stable centered
+  innovation moments in Python as well.
+- Unify default process matching, including OU and CIR, around conditional-SD
+  scaling, `1e-7` acceptance and damped Newton refinement. Use direct two-moment
+  feasibility bounds instead of a generic nonnegative least-squares problem.
+- Reject invalid AR grid widths and non-vector Python OU grids, restore MATLAB
+  AR help text, correct diagnostic return annotations, and use portable numerical
+  tolerances for historical Python solver fixtures.
 - Stabilize the CIR density with scaled Bessel functions and log reference weights;
   include tests, the OU compatibility entry point, regenerated MATLAB R2026a
   default fixtures, and updated guide/API documentation. Preserve the historical

@@ -16,10 +16,15 @@ dual = 0;
 for count = 1:requested
     evaluated = powers(1:count,:);
     target = targets(1:count);
-    if count == 2 && -min(powers(1,:))*max(powers(1,:)) < targets(2)
-        break
-    end
-    if count > 1 && ~momentTargetFeasible(evaluated,target)
+    if count == 2
+        z = powers(1,:);
+        left = max(z(z <= 0)); right = min(z(z >= 0));
+        minimumVariance = -left*right;
+        maximumVariance = -min(z)*max(z);
+        if targets(2) < minimumVariance || targets(2) > maximumVariance
+            break
+        end
+    elseif count > 2 && ~momentTargetFeasible(evaluated,target)
         break
     end
     initial = [dual;0];

@@ -111,8 +111,10 @@ those core routines do not inject floors.
 same feasible even grid `x_n=d*n`, maximize stationary Gamma coverage within the
 sufficient feasibility interval, and match exact conditional mean and variance.
 The Feller restriction is `sigma^2 <= 2*kappa*mu`; `N>=3`. An empty feasible set
-raises an error suggesting more nodes. Python's explicit `coverage` or `method`
-arguments preserve its pre-0.2.0 grids; they do not invoke the new selection rule.
+raises an error suggesting more nodes. Python's optional keyword `method="even"`
+selects this same corrected construction. The former `coverage` and exponential
+grid interface has been retired; it no longer routes to the incorrect historical
+conditional-variance formula.
 
 `discretization.discreteOU(kappa,sigma,Delta,gridOrN)` and
 `discrete_ou(mean_reversion,volatility,step,grid_or_count)` discretize the centered
@@ -121,18 +123,14 @@ strictly increasing fixed grid. Both match exact conditional mean and variance
 and reject infeasible grids. The legacy MATLAB `discreteOU` wrapper is in
 `Discretize OU/`.
 
-`discretization.discreteOUAsymmetricLaplaceJumps(kappa,sigma,jumpIntensity, ...
-upperRate,lowerRate,Delta,gridOrN)` and
-`discrete_ou_asymmetric_laplace_jumps(mean_reversion,volatility,jump_intensity, ...
-upper_rate,lower_rate,step,grid_or_count)` use centered geometric aggregate jumps.
-All scales are positive; intensity can be zero, giving Gaussian OU. With
-`q=exp(-intensity*step)`, the jump count is geometric: `Pr(M=m)=q*(1-q)^m`.
-Conditional on at least one jump the aggregate tail rates obey
-`a*b=q*upper_rate*lower_rate` and `a-b=upper_rate-lower_rate`. This is a finite-step
-splitting approximation to compensated compound-Poisson OU, with jumps placed at
-step end. For a longer horizon use powers of the transition matrix; decrease the
-step to check timing error. MATLAB's third output and Python's
-`return_diagnostics=True` expose step parameters and conditional variance.
+All default process routines, including CIR and OU, use the shared sequential
+matcher with moments in conditional-standard-deviation units. Accepted moment
+residuals are at most `1e-7` in those units; refinement targets `1e-10`.
+Mean and variance feasibility use direct grid bounds, including the minimum
+variance from the adjacent bracketing nodes; higher moments use a convex-hull
+check. CIR and OU require both moments and raise on failure rather than silently
+accepting a lower-order fallback. Explicit 0.1.0 floor options retain the frozen
+algorithms and their original tolerances for reproducibility.
 
 ## Gaussian-mixture AR on an evenly spaced grid
 
@@ -185,7 +183,6 @@ from discretization import (
 | `discreteVAR` | `discrete_var` |
 | `discreteCIR` | `discrete_cir` |
 | `discreteOU` | `discrete_ou` |
-| `discreteOUAsymmetricLaplaceJumps` | `discrete_ou_asymmetric_laplace_jumps` |
 | `discreteGaussianMixtureAR` | `discrete_gaussian_mixture_ar` |
 | `discreteStochasticVolatilityAR` | `discrete_stochastic_volatility_ar` |
 | `momentMatchedDistribution` | `moment_matched_distribution` |

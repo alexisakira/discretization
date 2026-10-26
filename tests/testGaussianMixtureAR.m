@@ -1,4 +1,4 @@
-function tests = testGaussianMixtureAREven
+function tests = testGaussianMixtureAR
 tests = functiontests(localfunctions);
 end
 

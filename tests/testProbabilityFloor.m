@@ -42,6 +42,7 @@ function testOptionalMixtureMethods(testCase)
 for method={'gauss-legendre','clenshaw-curtis','gauss-hermite','GMQ'}
     [P,~,d]=discretization.discreteGaussianMixtureAR(0,.4,[.4,.6],[-.1,.1],[.1,.2],21,4,method{1},4);
     verifyEqual(testCase,sum(P,2),ones(21,1),'AbsTol',1e-12);
+    verifyTrue(testCase,all(isfield(d,{'innovationMean','innovationSD','unconditionalMean','stationarySD'})));
     for row=1:21
         if d.matchedMoments(row)>0
             verifyLessThanOrEqual(testCase,max(abs(d.standardizedMomentErrors(row,1:d.matchedMoments(row)))),d.momentTolerance);
@@ -55,16 +56,19 @@ verifyEqual(testCase,d.matchedMoments,zeros(9,1));
 verifyEqual(testCase,P(:,end),ones(9,1));
 verifyGreaterThan(testCase,X(end),X(1));
 end
-function testJumpOUMomentsAndZeroJump(testCase)
-[P,X,info]=discretization.discreteOUAsymmetricLaplaceJumps(.7,.3,.1,2.7,1.05,.25,21);
-means=P*X'; variance=sum(P.*(X-info.rho*X').^2,2);
-verifyEqual(testCase,means,info.rho*X','AbsTol',1e-7*info.stationarySD);
-verifyEqual(testCase,variance,info.conditionalVariance*ones(21,1),'AbsTol',1e-7*info.stationaryVariance);
-[zero,Z]=discretization.discreteOUAsymmetricLaplaceJumps(.7,.3,0,2.7,1.05,.25,21);
-[gaussian,G]=discretization.discreteOU(.7,.3,.25,21);
-verifyEqual(testCase,Z,G,'AbsTol',1e-14);
-verifyEqual(testCase,zero,gaussian,'AbsTol',1e-8);
+function testOUShortStepAccuracyAndFixedGrid(testCase)
+for gap=[.25,.01,.001,.0001]
+    [P,X]=discretization.discreteOU(.7,.3,gap,21);
+    rho=exp(-.7*gap); variance=.3^2/1.4*(-expm1(-1.4*gap));
+    verifyLessThan(testCase,max(abs(sum(P.*(X-rho*X').^2,2)/variance-1)),1e-7);
+    [fixed,grid]=discretization.discreteOU(.7,.3,gap,X);
+    verifyEqual(testCase,grid,X); verifyEqual(testCase,fixed,P,'AbsTol',1e-12);
+end
 verifyError(testCase,@() discretization.discreteOU(.7,.3,.01,[-1,0,1]),'discretization:discreteOU:InfeasibleGrid');
+end
+function testARValidationAndHelp(testCase)
+verifyError(testCase,@() discretization.discreteAR(0,.9,.1,9,'even',2,-1),'MATLAB:discreteAR:expectedPositive');
+verifyNotEmpty(testCase,strfind(help('discretization.discreteAR'),'Gaussian AR(1)'));
 end
 function testCIRFellerEqualityAndInfeasibleGrid(testCase)
 % Exact binary inputs avoid an ambiguous floating-point Feller boundary.

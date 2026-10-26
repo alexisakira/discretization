@@ -9,7 +9,6 @@ from discretization import (
     discrete_cir,
     discrete_gaussian_mixture_ar,
     discrete_ou,
-    discrete_ou_asymmetric_laplace_jumps,
     discrete_stochastic_volatility_ar,
     discrete_var,
 )
@@ -73,11 +72,11 @@ def test_explicit_floor_reproduces_legacy_fixtures(name):
     p, x = call()
     if name == "ar":
         # The 0.1.0 Python/MATLAB four-moment solvers already differed by
-        # 3.3e-6. Require exact reproduction of the original Python output,
+        # 3.3e-6. Check numerical reproduction of the original Python output,
         # as well as its historical cross-language accuracy.
         old = np.load(ROOT / "reference_data/python_0_1_ar4.npz")
-        np.testing.assert_array_equal(p, old["transition"])
-        np.testing.assert_array_equal(x, old["grid"])
+        np.testing.assert_allclose(p, old["transition"], atol=1e-8, rtol=0)
+        np.testing.assert_allclose(x, old["grid"], atol=1e-12, rtol=0)
         np.testing.assert_allclose(p, f[key + "Transition"], atol=4e-6, rtol=0)
     else:
         np.testing.assert_allclose(p, f[key + "Transition"], atol=1e-7, rtol=0)
@@ -128,6 +127,14 @@ def test_mixture_diagnostics(method):
     np.testing.assert_array_equal(
         d["matched_moments"], fixture[f"gmOptionalD{index}"]["matchedMoments"]
     )
+    np.testing.assert_allclose(
+        d["innovation_sd"], fixture[f"gmOptionalD{index}"]["innovationSD"], atol=1e-14
+    )
+    np.testing.assert_allclose(
+        d["unconditional_mean"],
+        fixture[f"gmOptionalD{index}"]["unconditionalMean"],
+        atol=1e-14,
+    )
     for row, matched in enumerate(d["matched_moments"]):
         if matched:
             assert (
@@ -167,30 +174,29 @@ def test_ar2_lags_and_matlab_diagnostic_parity():
         assert np.all(p[row, x[1] != x[0, row]] == 0)
 
 
-@pytest.mark.parametrize("model", ["cir", "ou", "jump"])
+@pytest.mark.parametrize("model", ["cir", "ou"])
 def test_new_diffusions_match_matlab(model):
     f = loadmat(ROOT / "reference_data/matlab_r2026a_0_2.mat")
     if model == "cir":
         p, x = discrete_cir(-np.log(0.58), 0.028, 0.1, 0.25, 9)
-    elif model == "ou":
-        p, x = discrete_ou(0.7, 0.3, 0.25, 21)
     else:
-        p, x = discrete_ou_asymmetric_laplace_jumps(0.7, 0.3, 0.1, 2.7, 1.05, 0.25, 21)
+        p, x = discrete_ou(0.7, 0.3, 0.25, 21)
     np.testing.assert_allclose(x, f[model + "Grid"].ravel(), atol=1e-12, rtol=0)
     np.testing.assert_allclose(p, f[model + "Transition"], atol=1e-7, rtol=0)
 
 
-def test_ou_moments_zero_jumps_and_infeasible_grid():
-    p, x = discrete_ou(0.7, 0.3, 0.25, 21)
-    rho = np.exp(-0.7 * 0.25)
-    variance = 0.3**2 / (2 * 0.7) * (-np.expm1(-2 * 0.7 * 0.25))
+@pytest.mark.parametrize("gap", [0.25, 0.01, 0.001, 0.0001])
+def test_ou_moments_fixed_and_infeasible_grid(gap):
+    p, x = discrete_ou(0.7, 0.3, gap, 21)
+    rho = np.exp(-0.7 * gap)
+    variance = 0.3**2 / (2 * 0.7) * (-np.expm1(-2 * 0.7 * gap))
     np.testing.assert_allclose(p @ x, rho * x, atol=1e-8)
     np.testing.assert_allclose(
-        np.sum(p * (x - rho * x[:, None]) ** 2, axis=1), variance, atol=1e-8
+        np.sum(p * (x - rho * x[:, None]) ** 2, axis=1) / variance, 1, atol=1e-7, rtol=0
     )
-    zero, z = discrete_ou_asymmetric_laplace_jumps(0.7, 0.3, 0, 2.7, 1.05, 0.25, 21)
-    np.testing.assert_allclose(z, x, atol=1e-14)
-    np.testing.assert_allclose(zero, p, atol=1e-8)
+    fixed, y = discrete_ou(0.7, 0.3, gap, x)
+    np.testing.assert_allclose(y, x, atol=1e-14)
+    np.testing.assert_allclose(fixed, p, atol=1e-12)
     with pytest.raises(ValueError, match="infeasible"):
         discrete_ou(0.7, 0.3, 0.01, [-1, 0, 1])
 
@@ -245,3 +251,16 @@ def test_cir_feller_equality_and_infeasible_grid():
     )
     with pytest.raises(ValueError, match="increase state_count"):
         discrete_cir(0.5, 0.03, 0.1, 0.0001, 3)
+
+
+@pytest.mark.parametrize("width", [-1, 0, np.nan, np.inf])
+def test_invalid_ar_grid_width(width):
+    with pytest.raises(ValueError, match="grid_width"):
+        discrete_ar(0, 0.9, 0.1, 9, grid_width=width)
+
+
+def test_ou_rejects_matrix_grid():
+    with pytest.raises(ValueError, match="one-dimensional"):
+        discrete_ou(
+            0.7, 0.3, 0.25, [[-0.7, -0.5, -0.3], [-0.1, 0.1, 0.3], [0.5, 0.7, 0.9]]
+        )

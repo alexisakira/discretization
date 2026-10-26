@@ -1,10 +1,13 @@
 """Relative log references and sequential, scale-free moment matching."""
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.optimize import nnls
 from scipy.special import log_ndtr
 
 from .maxent import entropy_objective, maximum_entropy_weights
+
+ProcessResult = tuple[NDArray, NDArray] | tuple[NDArray, NDArray, dict[str, object]]
 
 
 def validate_floor(value):
@@ -45,9 +48,13 @@ def sequential_match(grid, powers, targets, prior, requested, tolerance=1e-7):
     matched, dual = 0, np.zeros(0)
     for count in range(1, requested + 1):
         evaluated, target = powers[:count], targets[:count]
-        if count == 2 and -powers[0].min() * powers[0].max() < targets[1]:
-            break
-        if count > 1:
+        if count == 2:
+            z = powers[0]
+            minimum_variance = -z[z <= 0].max() * z[z >= 0].min()
+            maximum_variance = -z.min() * z.max()
+            if targets[1] < minimum_variance or targets[1] > maximum_variance:
+                break
+        elif count > 2:
             constraints = np.vstack((np.ones(prior.size), evaluated))
             rhs = np.r_[1.0, target]
             _, residual = nnls(constraints, rhs)
@@ -78,9 +85,14 @@ def sequential_match(grid, powers, targets, prior, requested, tolerance=1e-7):
             step = np.linalg.solve(hessian, refined_error)
             for damping in range(21):
                 new_dual = candidate_dual - step * 2.0 ** (-damping)
-                new_objective, new_error, new_hessian, new_probability = (
-                    entropy_objective(new_dual, evaluated, target, prior)
-                )
+                if not np.isfinite(new_dual).all():
+                    continue
+                try:
+                    new_objective, new_error, new_hessian, new_probability = (
+                        entropy_objective(new_dual, evaluated, target, prior)
+                    )
+                except (FloatingPointError, ValueError, np.linalg.LinAlgError):
+                    continue
                 if (
                     np.isfinite(new_objective)
                     and np.linalg.norm(new_error, np.inf)
