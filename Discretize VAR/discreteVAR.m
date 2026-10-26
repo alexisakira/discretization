@@ -1,6 +1,6 @@
-function [P,X] = discreteVAR(varargin)
-%DISCRETEVAR Compatibility entry point for discretization.discreteVAR.
+function varargout = discreteVAR(varargin)
+% Compatibility wrapper; all options and diagnostics are forwarded.
 warning('discretization:legacyEntryPoint', ...
-    'Use discretization.discreteVAR instead of the unqualified entry point.')
-[P,X] = discretization.discreteVAR(varargin{:});
+    'Use discretization.discreteVAR instead of discreteVAR.');
+[varargout{1:nargout}] = discretization.discreteVAR(varargin{:});
 end

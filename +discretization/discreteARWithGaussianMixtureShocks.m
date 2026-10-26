@@ -1,7 +1,7 @@
-function [P,X] = discreteARWithGaussianMixtureShocks(varargin)
+function [P,X,diagnostics] = discreteARWithGaussianMixtureShocks(varargin)
 %DISCRETEARWITHGAUSSIANMIXTURESHOCKS Compatibility name.
 warning('discretization:deprecatedFunction', ...
     ['discretization.discreteARWithGaussianMixtureShocks is deprecated. ' ...
     'Use discretization.discreteGaussianMixtureAR instead.'])
-[P,X] = discretization.discreteGaussianMixtureAR(varargin{:});
+[P,X,diagnostics] = discretization.discreteGaussianMixtureAR(varargin{:});
 end

@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use this software in research, please cite the preferred article below."
 title: "Farmer-Toda Discretization"
 type: software
-version: 0.1.0
-date-released: 2026-08-17
+version: 0.2.0
+date-released: 2026-10-26
 license: GPL-3.0-only
 repository-code: "https://github.com/alexisakira/discretization"
 url: "https://github.com/alexisakira/discretization"

@@ -13,7 +13,7 @@
 %
 % Usage:
 %       [P,X] = discretization.discreteVAR(...
-%           b,B,Psi,Nm,nMoments,method,nSigmas)
+%           b,B,Psi,Nm,nMoments,method,nSigmas,varargin)
 %
 % Inputs:
 % b         - (M x 1) constant vector
@@ -66,7 +66,9 @@
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 
-function [P,X] = discreteVAR(b,B,Psi,Nm,nMoments,method,nSigmas)
+function [P,X,diagnostics] = discreteVAR(b,B,Psi,Nm,varargin)
+[options,floorValue] = processOptions(varargin,{2,'even',sqrt(Nm-1)});
+[nMoments,method,nSigmas] = options{:};
 
 %% Input error checks
 
@@ -77,7 +79,7 @@ warning('off','MATLAB:singularMatrix');
 % Make sure the correct number of arguments are provided
 if nargin < 4
     error('You must supply at least 4 arguments to discreteVAR')
-elseif nargin >= 6
+else
     if ~strcmp(method,'quantile') && ~strcmp(method,'even') && ~strcmp(method,'quadrature')
         error('Method must be one of quantile, even, or quadrature')
     end
@@ -86,21 +88,11 @@ elseif nargin >= 6
     end
 end
 
-% Default number of moments is 2
-if nargin == 4
-    nMoments = 2;
-end
-
-% Default method is 'even'
-if nargin <= 5
-    method = 'even';
-end
-
 bSize = size(B);
 M = bSize(1);
 % Check to see if user has provided an explicit spacing for the 'even'
 % method. If not, use default value.
-if strcmp(method,'even') && nargin < 7
+if isempty(nSigmas)
     nSigmas = sqrt(Nm-1);
 end
 
@@ -199,85 +191,40 @@ end
 D = allcomb2(y1D)';
 
 %% Construct finite-state Markov chain approximation
-
-condMean = A*D; % conditional mean of the VAR process at each grid point
-P = zeros(Nm^M); % probability transition matrix
-scalingFactor = y1D(:,end); % normalizing constant for maximum entropy computations
-temp = zeros(M,Nm); % used to store some intermediate calculations
-lambdaBar = zeros(2*M,Nm^M); % store optimized values of lambda (2 moments) to improve initial guesses
-kappa = 1e-8; % small positive constant for numerical stability
-
-for ii = 1:(Nm^M)
-   
-    % Construct prior guesses for maximum entropy optimizations
-    switch method
-        case 'even'
-            q = normpdf(y1D,condMean(:,ii),1);
-        case 'quantile'
-            q = normcdf(y1DBounds(:,2:end),condMean(:,ii),1)...
-                - normcdf(y1DBounds(:,1:end-1),condMean(:,ii),1);
-        case 'quadrature'
-            q = (normpdf(y1D,condMean(:,ii),1)./normpdf(y1D,0,1))...
-                .*(weights'./sqrt(pi));
-    end
-    
-    % Make sure all elements of the prior are stricly positive
-    q(q<kappa) = kappa;
-    
-    for jj = 1:M
-        
-        % Try to use intelligent initial guesses
-        if ii == 1
-            lambdaGuess = zeros(2,1);
-        else
-            lambdaGuess = lambdaBar((jj-1)*2+1:jj*2,ii-1);
-        end
-        
-        % Maximum entropy optimization
-        if nMoments == 1 % match only 1 moment
-            temp(jj,:) = maximumEntropyWeightsCore(y1D(jj,:),...
-                @(X)(X-condMean(jj,ii))/scalingFactor(jj),0,q(jj,:),0);
-        else % match 2 moments first
-            [p,lambda,momentError] = maximumEntropyWeightsCore(y1D(jj,:),...
-                @(X) polynomialMoment(X,condMean(jj,ii),scalingFactor(jj),2),...
-                [0; 1]./(scalingFactor(jj).^(1:2)'),q(jj,:),lambdaGuess);
-            if norm(momentError) > 1e-5 % if 2 moments fail, then just match 1 moment
-                warning('Failed to match first 2 moments. Just matching 1.')
-                temp(jj,:) = maximumEntropyWeightsCore(y1D(jj,:),...
-                    @(X)(X-condMean(jj,ii))/scalingFactor(jj),0,q(jj,:),0);
-                lambdaBar((jj-1)*2+1:jj*2,ii) = zeros(2,1);
-            elseif nMoments == 2
-                lambdaBar((jj-1)*2+1:jj*2,ii) = lambda;
-                temp(jj,:) = p;
-            else % solve maximum entropy problem sequentially from low order moments
-                lambdaBar((jj-1)*2+1:jj*2,ii) = lambda;
-                for mm = 4:2:nMoments
-                    lambdaGuess = [lambda;0;0]; % add zero to previous lambda
-                    [pnew,lambda,momentError] = maximumEntropyWeightsCore(y1D(jj,:),...
-                        @(X) polynomialMoment(X,condMean(jj,ii),scalingFactor(jj),mm),...
-                        gaussianMoment(1:mm)./(scalingFactor(jj).^(1:mm)'),q(jj,:),lambdaGuess);
-                    if norm(momentError) > 1e-5
-                        warning('Failed to match first %d moments.  Just matching %d.',...
-                            mm,mm-2)
-                        break;
-                    else
-                        p = pnew;
-                    end
-                end
-                temp(jj,:) = p;
-            end
-        end
-    end
-    
-    rowProbability = temp(1,:);
-    for jj = 2:M
-        rowProbability = kron(rowProbability,temp(jj,:));
-    end
-    P(ii,:) = rowProbability;
-    
+if floorValue > 0
+    [P,X] = legacyDiscreteVAR(b,B,Psi,Nm,nMoments,method,nSigmas,floorValue);
+    diagnostics = struct('probabilityFloor',floorValue,'matchedMoments',[]);
+    return
 end
-
-X = C*D + repmat(mu,1,Nm^M); % map grids back to original space
-
+condMean = A*D;
+P = zeros(Nm^M);
+matched = zeros(Nm^M,M);
+errors = zeros(Nm^M,M,nMoments);
+for row = 1:Nm^M
+    rowProbability = 1;
+    for component = 1:M
+        grid = y1D(component,:);
+        center = condMean(component,row);
+        switch method
+            case 'even'
+                logPrior = -0.5*(grid-center).^2-0.5*log(2*pi);
+            case 'quantile'
+                logPrior = normalIntervalLogProbability(y1DBounds(component,1:end-1)-center, ...
+                    y1DBounds(component,2:end)-center);
+            case 'quadrature'
+                logPrior = log(weights'/sqrt(pi))-0.5*(grid-center).^2+0.5*grid.^2;
+        end
+        prior = relativeReferenceWeights(logPrior);
+        powers = (grid-center).^((1:nMoments)');
+        [probability,matched(row,component)] = sequentialMomentMatch( ...
+            grid,powers,gaussianMoment(1:nMoments),prior,nMoments,1e-7);
+        errors(row,component,:) = powers*probability'-gaussianMoment(1:nMoments);
+        rowProbability = kron(rowProbability,probability);
+    end
+    P(row,:) = rowProbability;
 end
-
+X = C*D+repmat(mu,1,Nm^M);
+diagnostics = struct('requestedMoments',nMoments,'matchedMoments',matched, ...
+    'standardizedMomentErrors',errors,'momentTolerance',1e-7, ...
+    'downgradedRows',find(any(matched < nMoments,2)),'probabilityFloor',0);
+end

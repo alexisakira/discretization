@@ -13,21 +13,11 @@ if (r <= 0)||(a <= 0)||(b <= 0)||(sigma <= 0)||(Delta <= 0)
     error('r, a, b, sigma, Delta must be positive')
 end
 
-if 2*a*b - sigma^2 <= 0
-    error('It must be sigma^2 < 2*a*b')
+if sigma^2 > 2*a*b
+    error('It must be sigma^2 <= 2*a*b')
 end
 
-%% define parameters
-
-c = (2*a)/((1-exp(-a*Delta))*sigma^2);
-q = 2*a*b/sigma^2 - 1;
-u = c*r*exp(-a*Delta);
-v = c*x;
-
-%% compute density
-
-Z = 2*sqrt(u*v);
-density = c*exp(-u-v).*(v/u).^(q/2).*besseli(q,Z);
-
+validateattributes(x,{'numeric'},{'real','finite','nonnegative'});
+validateattributes([r,a,b,sigma,Delta],{'numeric'},{'real','finite','positive'});
+density = exp(cirLogDensity(x,r,a,b,sigma,Delta));
 end
-

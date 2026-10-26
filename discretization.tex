@@ -469,28 +469,54 @@ where
   q=\frac{2ab}{\sigma^2}-1,\quad
   u=cr\e^{-a\Delta},\quad v=cr'.
 \end{equation*}
-The Feller restriction $\sigma^2<2ab$ is imposed. The conditional moments are
+The Feller restriction $\sigma^2\leq 2ab$ is imposed. The conditional moments are
 \begin{align*}
   \CE{r'|r}&=r\e^{-a\Delta}+b(1-\e^{-a\Delta}),\\
   \Cvar{r'|r}&=\frac{\sigma^2}{a}(1-\e^{-a\Delta})
-  \left(r\e^{-a\Delta}+\frac b2\right).
+  \left(r\e^{-a\Delta}+\frac b2(1-\e^{-a\Delta})\right).
 \end{align*}
 
 The interfaces are
 \begin{lstlisting}[language=Matlab]
 [P, X] = discretization.discreteCIR( ...
-    a, b, sigma, Delta, N, Coverage, method);
+    a, b, sigma, Delta, N);
 \end{lstlisting}
 \begin{lstlisting}[language=Python]
 P, grid = discrete_cir(
     mean_reversion, long_run_mean, volatility, step,
-    state_count, coverage=0.999, method="exponential",
+    state_count,
 )
 \end{lstlisting}
-Both evenly spaced and exponential grids are available. The exponential grid
-is the default because the process is positive and its stationary distribution
-can be concentrated near zero. The density itself is available through
-\code{cirTransitionDensity} and \code{cir\_transition\_density}.
+Both languages automatically select an evenly spaced grid that satisfies
+the sufficient conditions for matching the first two conditional moments and
+maximizes stationary coverage within the feasible set. Python also accepts
+\code{method="even"} to select this corrected construction explicitly; the
+former coverage and exponential-grid interface has been retired. The density
+itself is available through \code{cirTransitionDensity} and
+\code{cir\_transition\_density}.
+
+The log-density calculation uses scaled Bessel functions with a positive
+log-series fallback when the scaled function underflows. At zero noncentrality
+it uses the central Gamma limit. Both languages apply these rules to density
+evaluation and transition construction, including long observation gaps.
+
+\subsection{Ornstein--Uhlenbeck process}
+
+The centered Gaussian OU construction matches the exact conditional mean and
+variance of $\diff X_t=-\kappa X_t\diff t+\sigma\diff W_t$. With
+$\omega=\sigma/\sqrt{2\kappa}$, its automatic grid has endpoints
+$\pm\omega\sqrt{N-1}$. A fixed increasing grid can instead be supplied;
+infeasible two-moment grids raise an error before optimization of any row.
+\begin{lstlisting}[language=Matlab]
+[P,X] = discretization.discreteOU(.7,.3,.25,21);
+\end{lstlisting}
+\begin{lstlisting}[language=Python]
+P, grid = discrete_ou(.7, .3, .25, 21)
+\end{lstlisting}
+Both implementations use conditional-innovation-standard-deviation scaling
+and the shared sequential matcher described below, with residual acceptance
+tolerance $10^{-7}$. Both moments are required; a numerical failure raises an
+error. The grid choice and its historical width are unchanged.
 
 \section{Distribution and quadrature routines}
 
@@ -604,10 +630,49 @@ probability, dual, moment_error = maximum_entropy_weights(
 
 Scaling moment functions by a representative grid magnitude generally improves
 conditioning. Prior weights need not sum to one, but they must be nonnegative
-with at least one positive entry. Very small positive floors are useful when a
-density underflows in the tails.
+with at least one positive entry. Process reference weights are evaluated in
+log space: subtract the row maximum, clamp only at $\log(\mathrm{realmin})$,
+then exponentiate and normalize. This preserves rare transitions without an
+absolute density floor. The generic maximum-entropy routine preserves the
+support of user-supplied priors.
 
 \section{Numerical safeguards and verification}
+
+\subsection{Default change in version 0.2.0}
+
+Version 0.2.0 removes the absolute $10^{-8}$ reference-weight floor from the
+AR, VAR, Gaussian-mixture AR and stochastic-volatility routines in both
+languages. Default matrices therefore change. Artificial tail mass can cause
+material accumulated errors in likelihood-based estimation even when simulated
+moments are accurate. Historical grid widths and other process defaults remain.
+To recover the 0.1.0 process algorithms, use
+\begin{lstlisting}[language=Matlab]
+[Pold,X] = discretization.discreteAR(0,0.9,0.1,81, ...
+    'ProbabilityFloor',1e-8);
+\end{lstlisting}
+\begin{lstlisting}[language=Python]
+Pold, grid = discrete_ar(0, .9, .1, 81,
+                         probability_floor=1e-8)
+\end{lstlisting}
+The floor applies to reference weights, not final probabilities. Explicit
+positive floors select the legacy algorithm and return no matched-moment
+counts. Default MATLAB calls return diagnostics as a third output; Python
+uses \code{return\_diagnostics=True}. Counts are reported by row, and by
+rotated dimension for VAR, with standardized residual tolerance $10^{-7}$.
+
+The default matcher proceeds sequentially from the mean upward and retains
+the highest successful count. Centered standardized nodes $z$ must satisfy
+$\min z<0<\max z$ for strict mean feasibility and
+$-\min z\max z\geq 1$ for unit variance; a convex-hull check also enforces
+grid-spacing and higher-moment restrictions. The first two moments use
+exact minimum and maximum variance bounds on the grid, while higher moments
+use the generic convex-hull check. An infeasible or numerically
+failed mean match gives a point mass nearest the conditional mean and a count
+of zero. A higher-moment failure retains the preceding match. Near a truncated
+boundary, exact moments require tilting the normalized Gaussian density.
+Check both grid width and resolution before using a chain for likelihoods.
+
+
 
 The modernized code includes the following safeguards:
 \begin{itemize}
@@ -615,7 +680,7 @@ The modernized code includes the following safeguards:
   \item analytic gradient and Hessian calculations;
   \item finite-candidate fallback when an optimizer fails;
   \item convex-hull feasibility checks for selected moment targets;
-  \item positive floors for prior weights;
+  \item relative log-reference stabilization without an absolute floor;
   \item direct linear solves instead of explicit matrix inverses;
   \item a closed-form two-dimensional VAR variance rotation; and
   \item reduced temporary allocation in tensor-product transition matrices.
@@ -624,7 +689,8 @@ The modernized code includes the following safeguards:
 Automated tests cover row stochasticity, nonnegativity, default arguments,
 historical compatibility wrappers, alternate grid methods, higher-dimensional
 VAR structure, and reference parity between \matlab{} and \python{}. The
-reference files were generated with \matlab{} R2024b. Representative
+new default reference files were generated with \matlab{} R2026a; the
+historical R2024b files are retained for legacy regression checks. Representative
 performance workloads are provided in the repository's \code{benchmarks}
 directory; measured times are machine-specific.
 

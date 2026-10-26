@@ -8,8 +8,17 @@ import warnings
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import minimize, nnls
+from scipy.special import logsumexp
 from scipy.stats import norm
 
+from ._matching import (
+    ProcessResult,
+    diagnostics,
+    normal_interval_log_probability,
+    relative_weights,
+    sequential_match,
+    validate_floor,
+)
 from .maxent import maximum_entropy_weights
 from .quadrature import (
     clenshaw_curtis,
@@ -29,7 +38,10 @@ def discrete_var(
     moment_count: int = 2,
     method: str = "even",
     grid_width: float | None = None,
-) -> tuple[FloatArray, FloatArray]:
+    *,
+    probability_floor: float | None = None,
+    return_diagnostics: bool = False,
+) -> ProcessResult:
     """Discretize a Gaussian VAR(1) process.
 
     ``state_count`` is the number of grid points in each dimension. The
@@ -72,9 +84,10 @@ def discrete_var(
             RuntimeWarning,
             stacklevel=2,
         )
-    if normalized_method == "quadrature" and np.max(
-        np.abs(np.linalg.eigvals(lag_matrix))
-    ) > 0.8:
+    if (
+        normalized_method == "quadrature"
+        and np.max(np.abs(np.linalg.eigvals(lag_matrix))) > 0.8
+    ):
         warnings.warn(
             "The quadrature method may perform poorly for persistent processes.",
             RuntimeWarning,
@@ -92,9 +105,7 @@ def discrete_var(
     if dimension == 1:
         transform = covariance_cholesky
         standardized_lag = lag_matrix.copy()
-        stationary_covariance = np.array(
-            [[1 / (1 - float(lag_matrix[0, 0]) ** 2)]]
-        )
+        stationary_covariance = np.array([[1 / (1 - float(lag_matrix[0, 0]) ** 2)]])
     else:
         standardized_lag = np.linalg.solve(
             covariance_cholesky,
@@ -102,8 +113,7 @@ def discrete_var(
         )
         vectorized_identity = identity.reshape(-1, order="F")
         covariance_vector = np.linalg.solve(
-            np.eye(dimension**2)
-            - np.kron(standardized_lag, standardized_lag),
+            np.eye(dimension**2) - np.kron(standardized_lag, standardized_lag),
             vectorized_identity,
         )
         initial_stationary_covariance = covariance_vector.reshape(
@@ -112,14 +122,10 @@ def discrete_var(
         )
         rotation = _minimum_variance_rotation(initial_stationary_covariance)
         standardized_lag = rotation.T @ standardized_lag @ rotation
-        stationary_covariance = (
-            rotation.T @ initial_stationary_covariance @ rotation
-        )
+        stationary_covariance = rotation.T @ initial_stationary_covariance @ rotation
         transform = covariance_cholesky @ rotation
 
-    stationary_covariance = (
-        stationary_covariance + stationary_covariance.T
-    ) / 2
+    stationary_covariance = (stationary_covariance + stationary_covariance.T) / 2
     stationary_std = np.sqrt(np.diag(stationary_covariance))
     one_dimensional_grids = np.empty((dimension, state_count))
     quantile_bounds: FloatArray | None = None
@@ -132,9 +138,7 @@ def discrete_var(
         endpoint = math.sqrt(minimum_variance) * grid_width
         one_dimensional_grids[:] = np.linspace(-endpoint, endpoint, state_count)
     elif normalized_method == "quantile":
-        probabilities = (2 * np.arange(1, state_count + 1) - 1) / (
-            2 * state_count
-        )
+        probabilities = (2 * np.arange(1, state_count + 1) - 1) / (2 * state_count)
         bound_probabilities = np.arange(1, state_count) / state_count
         quantile_bounds = np.empty((dimension, state_count + 1))
         for index in range(dimension):
@@ -157,50 +161,76 @@ def discrete_var(
     transition = np.zeros((total_state_count, total_state_count))
     scaling_factors = one_dimensional_grids[:, -1]
     previous_dual = np.zeros((dimension, 2))
-    minimum_prior = 1e-8
+    matched = np.zeros((total_state_count, dimension), dtype=int)
+    errors = np.zeros((total_state_count, dimension, moment_count))
+    legacy = validate_floor(probability_floor)
 
     for row in range(total_state_count):
-        if normalized_method == "even":
-            prior = norm.pdf(
-                one_dimensional_grids,
-                loc=conditional_means[:, row, None],
-                scale=1,
-            )
-        elif normalized_method == "quantile":
-            assert quantile_bounds is not None
-            prior = norm.cdf(
-                quantile_bounds[:, 1:],
-                loc=conditional_means[:, row, None],
-                scale=1,
-            ) - norm.cdf(
-                quantile_bounds[:, :-1],
-                loc=conditional_means[:, row, None],
-                scale=1,
-            )
-        else:
-            assert quadrature_weights is not None
-            prior = (
-                norm.pdf(
+        if legacy:
+            if normalized_method == "even":
+                prior = norm.pdf(
                     one_dimensional_grids,
                     loc=conditional_means[:, row, None],
                     scale=1,
                 )
-                / norm.pdf(one_dimensional_grids, loc=0, scale=1)
-                * (quadrature_weights / math.sqrt(math.pi))
-            )
-        prior = np.maximum(prior, minimum_prior)
+            elif normalized_method == "quantile":
+                assert quantile_bounds is not None
+                prior = norm.cdf(
+                    quantile_bounds[:, 1:],
+                    loc=conditional_means[:, row, None],
+                    scale=1,
+                ) - norm.cdf(
+                    quantile_bounds[:, :-1],
+                    loc=conditional_means[:, row, None],
+                    scale=1,
+                )
+            else:
+                assert quadrature_weights is not None
+                prior = (
+                    norm.pdf(
+                        one_dimensional_grids,
+                        loc=conditional_means[:, row, None],
+                        scale=1,
+                    )
+                    / norm.pdf(one_dimensional_grids, loc=0, scale=1)
+                    * (quadrature_weights / math.sqrt(math.pi))
+                )
+            prior = np.maximum(prior, probability_floor)
 
         component_probabilities = np.empty((dimension, state_count))
         for component in range(dimension):
             grid = one_dimensional_grids[component]
             conditional_mean = conditional_means[component, row]
             scaling = scaling_factors[component]
+            if not legacy:
+                z = grid - conditional_mean
+                if normalized_method == "even":
+                    log_prior = -0.5 * z**2
+                elif normalized_method == "quantile":
+                    log_prior = normal_interval_log_probability(
+                        quantile_bounds[component, :-1] - conditional_mean,
+                        quantile_bounds[component, 1:] - conditional_mean,
+                    )
+                else:
+                    log_prior = (
+                        np.log(quadrature_weights / math.sqrt(math.pi))
+                        - 0.5 * z**2
+                        + 0.5 * grid**2
+                    )
+                powers = z[None, :] ** np.arange(1, moment_count + 1)[:, None]
+                weights = relative_weights(log_prior)
+                probability, matched[row, component] = sequential_match(
+                    grid, powers, gaussian_moments, weights, moment_count
+                )
+                component_probabilities[component] = probability
+                errors[row, component] = powers @ probability - gaussian_moments
+                continue
 
             def moments(order: int):
                 powers = np.arange(1, order + 1)[:, None]
                 return lambda values: (
-                    (values - conditional_mean) / scaling
-                )[None, :] ** powers
+                    ((values - conditional_mean) / scaling)[None, :] ** powers
+                )
 
             if moment_count == 1:
                 probability, _, _ = maximum_entropy_weights(
@@ -277,6 +307,13 @@ def discrete_var(
         transition[row] = row_probability
 
     state_grid = transform @ standardized_states + unconditional_mean[:, None]
+    if return_diagnostics:
+        info = (
+            dict(probability_floor=probability_floor, matched_moments=None)
+            if legacy
+            else diagnostics(moment_count, matched, errors)
+        )
+        return transition, state_grid, info
     return transition, state_grid
 
 
@@ -290,7 +327,10 @@ def discrete_gaussian_mixture_ar(
     moment_count: int = 2,
     method: str = "even",
     grid_width: float | None = None,
-) -> tuple[FloatArray, FloatArray]:
+    *,
+    probability_floor: float | None = None,
+    return_diagnostics: bool = False,
+) -> ProcessResult:
     """Discretize an AR(p) process with Gaussian-mixture innovations."""
     coefficients = np.asarray(ar_coefficients, dtype=float).reshape(-1)
     probabilities = np.asarray(mixture_probabilities, dtype=float).reshape(-1)
@@ -309,9 +349,7 @@ def discrete_gaussian_mixture_ar(
     if not np.isfinite(mean):
         raise ValueError("mean must be finite")
     if not (
-        probabilities.size
-        == component_means.size
-        == component_std.size
+        probabilities.size == component_means.size == component_std.size
         and probabilities.size > 0
     ):
         raise ValueError("mixture parameter arrays must have equal positive length")
@@ -320,8 +358,17 @@ def discrete_gaussian_mixture_ar(
         for array in (probabilities, component_means, component_std)
     ):
         raise ValueError("mixture parameters must be finite")
-    if np.any(probabilities < 0) or not np.isclose(probabilities.sum(), 1):
+    legacy = validate_floor(probability_floor)
+    total_probability = probabilities.sum()
+    normalized = (
+        np.isclose(total_probability, 1)
+        if legacy
+        else abs(total_probability - 1) <= 1e-12
+    )
+    if np.any(probabilities < 0) or not normalized:
         raise ValueError("mixture_probabilities must be nonnegative and sum to one")
+    if not legacy:
+        probabilities = probabilities / total_probability
     if np.any(component_std <= 0):
         raise ValueError("mixture_standard_deviations must be positive")
 
@@ -334,24 +381,36 @@ def discrete_gaussian_mixture_ar(
     if spectral_radius >= 1:
         raise ValueError("ar_coefficients must define a stationary process")
 
-    component_variances = component_std**2
-    innovation_moments = np.array(
-        [
-            probabilities @ component_means,
-            probabilities @ (component_means**2 + component_variances),
-            probabilities
-            @ (component_means**3 + 3 * component_means * component_variances),
-            probabilities
-            @ (
-                component_means**4
-                + 6 * component_means**2 * component_variances
-                + 3 * component_variances**2
-            ),
-        ]
-    )
-    innovation_std = math.sqrt(
-        innovation_moments[1] - innovation_moments[0] ** 2
-    )
+    if legacy:
+        component_variances = component_std**2
+        innovation_moments = np.array(
+            [
+                probabilities @ component_means,
+                probabilities @ (component_means**2 + component_variances),
+                probabilities
+                @ (component_means**3 + 3 * component_means * component_variances),
+                probabilities
+                @ (
+                    component_means**4
+                    + 6 * component_means**2 * component_variances
+                    + 3 * component_variances**2
+                ),
+            ]
+        )
+        innovation_std = math.sqrt(innovation_moments[1] - innovation_moments[0] ** 2)
+    else:
+        active = probabilities > 0
+        probabilities = probabilities[active]
+        component_means = component_means[active]
+        component_std = component_std[active]
+        center = probabilities @ component_means
+        innovation_std = math.sqrt(
+            probabilities @ (component_std**2 + (component_means - center) ** 2)
+        )
+        if not np.isfinite(innovation_std) or innovation_std <= 0:
+            raise ValueError(
+                "innovation standard deviation must be finite and positive"
+            )
     basis = np.zeros(order**2)
     basis[0] = 1
     inverse_first_column = np.linalg.solve(
@@ -420,36 +479,78 @@ def discrete_gaussian_mixture_ar(
             axis=1,
         )
 
-    state_grid = _cartesian_product_rows(
-        np.tile(one_dimensional_grid, (order, 1))
-    )
+    state_grid = _cartesian_product_rows(np.tile(one_dimensional_grid, (order, 1)))
     total_state_count = state_count**order
     lag_state_count = state_count ** (order - 1)
     transition = np.zeros((total_state_count, total_state_count))
     scaling = float(np.max(np.abs(one_dimensional_grid)))
-    minimum_prior = 1e-8
-    reference_pdf: FloatArray | None = None
-    if normalized_method == "gauss_hermite":
-        reference_pdf = norm.pdf(
-            one_dimensional_grid,
-            loc=0,
-            scale=innovation_std,
+    legacy = validate_floor(probability_floor)
+    matched = np.zeros(total_state_count, dtype=int)
+    errors = np.zeros((total_state_count, 4))
+    active = probabilities > 0
+    p, means, sds = (
+        probabilities[active],
+        component_means[active],
+        component_std[active],
+    )
+    center = innovation_moments[0] if legacy else center
+    cm = means - center
+    central_targets = np.array(
+        [
+            0.0,
+            1.0,
+            p @ (cm**3 + 3 * cm * sds**2) / innovation_std**3,
+            p @ (cm**4 + 6 * cm**2 * sds**2 + 3 * sds**4) / innovation_std**4,
+        ]
+    )
+
+    def log_density(values):
+        z = (np.asarray(values)[:, None] - means) / sds
+        return logsumexp(
+            np.log(p) - np.log(sds) - 0.5 * np.log(2 * np.pi) - 0.5 * z**2, axis=1
         )
-    elif normalized_method == "gaussian_mixture":
-        reference_pdf = mixture_pdf(one_dimensional_grid)
+
+    reference_pdf: FloatArray | None = None
+    if legacy:
+        if normalized_method == "gauss_hermite":
+            reference_pdf = norm.pdf(
+                one_dimensional_grid,
+                loc=0,
+                scale=innovation_std,
+            )
+        elif normalized_method == "gaussian_mixture":
+            reference_pdf = mixture_pdf(one_dimensional_grid)
 
     for row in range(total_state_count):
-        conditional_mean = mean * (1 - coefficients.sum()) + coefficients @ state_grid[:, row]
+        conditional_mean = (
+            mean * (1 - coefficients.sum()) + coefficients @ state_grid[:, row]
+        )
         centered_grid = one_dimensional_grid - conditional_mean
+        if not legacy:
+            log_prior = np.log(integration_weights) + log_density(centered_grid)
+            if normalized_method == "gauss_hermite":
+                log_prior -= norm.logpdf(
+                    one_dimensional_grid - mean, scale=innovation_std
+                )
+            elif normalized_method == "gaussian_mixture":
+                log_prior -= log_density(one_dimensional_grid - mean)
+            weights = relative_weights(log_prior)
+            z = (centered_grid - center) / innovation_std
+            powers = z[None, :] ** np.arange(1, 5)[:, None]
+            probability, matched[row] = sequential_match(
+                one_dimensional_grid, powers, central_targets, weights, moment_count
+            )
+            errors[row] = powers @ probability - central_targets
+            destinations = np.arange(
+                row // state_count, total_state_count, lag_state_count
+            )
+            transition[row, destinations] = probability
+            continue
         if reference_pdf is None:
             prior = integration_weights * mixture_pdf(centered_grid)
         else:
-            prior = (
-                integration_weights
-                * mixture_pdf(centered_grid)
-                / reference_pdf
-            )
-        prior = np.maximum(prior, minimum_prior)
+            prior = integration_weights * mixture_pdf(centered_grid) / reference_pdf
+        prior = np.maximum(prior, probability_floor)
         standardized = centered_grid / scaling
         powers = standardized[None, :] ** np.arange(1, 5)[:, None]
         scaled_targets = innovation_moments / scaling ** np.arange(1, 5)
@@ -538,6 +639,27 @@ def discrete_gaussian_mixture_ar(
         )
         transition[row, destinations] = probability
 
+    if return_diagnostics:
+        info = (
+            dict(probability_floor=probability_floor, matched_moments=None)
+            if legacy
+            else diagnostics(moment_count, matched, errors)
+        )
+        if not legacy:
+            info.update(
+                innovation_mean=float(center),
+                innovation_sd=innovation_std,
+                unconditional_mean=mean + float(center) / (1 - coefficients.sum()),
+                stationary_sd=unconditional_std,
+                grid_half_width_sd=grid_width,
+            )
+            if normalized_method == "even":
+                spacing = one_dimensional_grid[1] - one_dimensional_grid[0]
+                info.update(
+                    grid_spacing=spacing,
+                    spacing_to_smallest_component_sd=spacing / component_std.min(),
+                )
+        return transition, state_grid, info
     return transition, state_grid
 
 
@@ -550,7 +672,10 @@ def discrete_stochastic_volatility_ar(
     volatility_state_count: int,
     method: str = "even",
     grid_width: float | None = None,
-) -> tuple[FloatArray, FloatArray]:
+    *,
+    probability_floor: float | None = None,
+    return_diagnostics: bool = False,
+) -> ProcessResult:
     """Discretize an AR(1) process with log AR(1) stochastic volatility."""
     _validate_state_count(state_count)
     _validate_state_count(volatility_state_count)
@@ -578,22 +703,24 @@ def discrete_stochastic_volatility_ar(
         1 - volatility_persistence**2
     )
     log_variance_mean = (
-        2 * math.log(unconditional_innovation_std)
-        - unconditional_log_variance / 2
+        2 * math.log(unconditional_innovation_std) - unconditional_log_variance / 2
     )
     unconditional_state_std = math.sqrt(
         math.exp(log_variance_mean + unconditional_log_variance / 2)
         / (1 - persistence**2)
     )
 
-    volatility_transition, volatility_grid_matrix = discrete_var(
+    volatility_result = discrete_var(
         [log_variance_mean * (1 - volatility_persistence)],
         [[volatility_persistence]],
         [[volatility_innovation_std**2]],
         volatility_state_count,
         moment_count=2,
         method=normalized_method,
+        probability_floor=probability_floor,
+        return_diagnostics=return_diagnostics and not validate_floor(probability_floor),
     )
+    volatility_transition, volatility_grid_matrix = volatility_result[:2]
     volatility_grid = volatility_grid_matrix.reshape(-1)
     state_grid_1d = np.linspace(
         -grid_width * unconditional_state_std,
@@ -609,7 +736,9 @@ def discrete_stochastic_volatility_ar(
     )
     transition = np.zeros((total_state_count, total_state_count))
     scaling = float(np.max(np.abs(state_grid_1d)))
-    minimum_prior = 1e-8
+    matched = np.zeros(total_state_count, dtype=int)
+    errors = np.zeros((total_state_count, 2))
+    legacy = validate_floor(probability_floor)
 
     for row in range(total_state_count):
         conditional_mean = persistence * joint_grid[0, row]
@@ -618,12 +747,27 @@ def discrete_stochastic_volatility_ar(
             + volatility_persistence * joint_grid[1, row]
             + volatility_innovation_std**2 / 2
         )
+        if not legacy:
+            z = (state_grid_1d - conditional_mean) / math.sqrt(conditional_variance)
+            powers = np.vstack((z, z**2))
+            probability, matched[row] = sequential_match(
+                state_grid_1d,
+                powers,
+                np.array([0.0, 1.0]),
+                relative_weights(-0.5 * z**2),
+                2,
+            )
+            errors[row] = powers @ probability - np.array([0.0, 1.0])
+            transition[row] = np.kron(
+                probability, volatility_transition[row % volatility_state_count]
+            )
+            continue
         prior = norm.pdf(
             state_grid_1d,
             loc=conditional_mean,
             scale=math.sqrt(conditional_variance),
         )
-        prior = np.maximum(prior, minimum_prior)
+        prior = np.maximum(prior, probability_floor)
 
         def moments(values: FloatArray) -> FloatArray:
             centered = (values - conditional_mean) / scaling
@@ -649,9 +793,7 @@ def discrete_stochastic_volatility_ar(
             )
             probability, _, _ = maximum_entropy_weights(
                 state_grid_1d,
-                lambda values: (
-                    (values - conditional_mean) / scaling
-                )[None, :],
+                lambda values: ((values - conditional_mean) / scaling)[None, :],
                 [0.0],
                 prior,
                 [0.0],
@@ -661,6 +803,15 @@ def discrete_stochastic_volatility_ar(
             volatility_transition[row % volatility_state_count],
         )
 
+    if return_diagnostics:
+        info = (
+            dict(probability_floor=probability_floor, matched_moments=None)
+            if legacy
+            else diagnostics(2, matched, errors)
+        )
+        if not legacy:
+            info["volatility"] = volatility_result[2]
+        return transition, joint_grid, info
     return transition, joint_grid
 
 

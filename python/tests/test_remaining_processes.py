@@ -13,7 +13,7 @@ from discretization import (
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = loadmat(
-    REPOSITORY_ROOT / "reference_data" / "matlab_r2024b_performance.mat"
+    REPOSITORY_ROOT / "reference_data" / "matlab_r2026a_0_2.mat"
 )
 
 

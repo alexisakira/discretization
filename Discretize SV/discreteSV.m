@@ -1,7 +1,6 @@
-function [P,yxGrids] = discreteSV(varargin)
-%DISCRETESV Compatibility alias for the descriptive package function.
-warning('discretization:deprecatedFunction', ...
-    ['discreteSV is deprecated. Use ' ...
-    'discretization.discreteStochasticVolatilityAR instead.'])
-[P,yxGrids] = discretization.discreteStochasticVolatilityAR(varargin{:});
+function varargout = discreteSV(varargin)
+% Compatibility wrapper; all options and diagnostics are forwarded.
+warning('discretization:legacyEntryPoint', ...
+    'Use discretization.discreteStochasticVolatilityAR instead of discreteSV.');
+[varargout{1:nargout}] = discretization.discreteStochasticVolatilityAR(varargin{:});
 end

@@ -6,7 +6,7 @@ from scipy.io import loadmat
 from discretization import discrete_ar
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-FIXTURE = loadmat(REPOSITORY_ROOT / "reference_data" / "matlab_r2024b_baseline.mat")
+FIXTURE = loadmat(REPOSITORY_ROOT / "reference_data" / "matlab_r2026a_0_2.mat")
 
 
 def test_discrete_ar_matches_matlab_reference():

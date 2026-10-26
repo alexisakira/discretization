@@ -10,7 +10,7 @@
 %
 % Usage:
 %       [P,yxGrids] = discretization.discreteStochasticVolatilityAR(...
-%           lambda,rho,sigmaU,sigmaE,Ny,Nx,method,nSigmaY)
+%           lambda,rho,sigmaU,sigmaE,Ny,Nx,method,nSigmaY,varargin)
 %
 % Inputs:
 % lambda    - persistence of y process
@@ -29,16 +29,15 @@
 % - Avoided combvec function, which requires Deep Learning Toolbox
 % - Changed output grid name from xyGrids to yxGrids because order is y, x
 % - Changed kappa to 1e-8
-function [P,yxGrids] = discreteStochasticVolatilityAR(lambda,rho,sigmaU,sigmaE,Ny,Nx,method,nSigmaY)
+function [P,yxGrids,diagnostics] = discreteStochasticVolatilityAR(lambda,rho,sigmaU,sigmaE,Ny,Nx,varargin)
+[options,floorValue] = processOptions(varargin,{'even',sqrt((Ny-1)/2)});
+[method,nSigmaY] = options{:};
 
-if nargin <= 6
-    method = 'even'; % default is evenly spaced grid
+if floorValue > 0
+    [P,yxGrids] = legacyDiscreteStochasticVolatilityAR(lambda,rho,sigmaU,sigmaE,Ny,Nx,method,nSigmaY,floorValue);
+    diagnostics = struct('probabilityFloor',floorValue,'matchedMoments',[]);
+    return
 end
-
-if nargin <= 7
-    nSigmaY = sqrt((Ny-1)/2); % spacing parameter for Y process
-end
-
 %% Compute some uncondtional moments
 
 sigmaX = (sigmaE^2)/(1-rho^2); % unconditional variance of variance process
@@ -47,7 +46,7 @@ sigmaY = sqrt(exp(xBar+sigmaX/2)/(1-lambda^2)); % uncondtional standard deviatio
 
 %% Construct technology process approximation
 
-[Px,xGrid] = discretization.discreteVAR(xBar*(1-rho),rho,sigmaE^2,Nx,2,method); % discretization of variance process
+[Px,xGrid,volatilityDiagnostics] = discretization.discreteVAR(xBar*(1-rho),rho,sigmaE^2,Nx,2,method); % discretization of variance process
 
 yGrid = linspace(-nSigmaY*sigmaY,nSigmaY*sigmaY,Ny);
 
@@ -57,29 +56,20 @@ temp1 = repmat(xGrid,1,Ny);
 temp2 = kron(yGrid,ones(1,Nx));
 yxGrids = flipud([temp1; temp2])'; % avoid using combvec, which requires deep learning toolbox
 P = zeros(Nm);
-scalingFactor = max(abs(yGrid));
-kappa = 1e-8; % small positive constant for numerical stability
-
-for ii = 1:Nm
-    
-    conditionalMean = lambda*yxGrids(ii,1);
-    conditionalVariance = exp((1-rho)*xBar+rho*yxGrids(ii,2)+(sigmaE^2)/2);
-    q = normpdf(yGrid,conditionalMean,sqrt(conditionalVariance));
-    if sum(q<kappa) > 0
-        q(q<kappa) = kappa;
-    end
-    [p,~,momentError] = maximumEntropyWeightsCore(yGrid,...
-        @(X) [(X-conditionalMean)./scalingFactor;...
-        ((X-conditionalMean)./scalingFactor).^2],...
-        [0;conditionalVariance/(scalingFactor^2)],q,zeros(2,1));
-    % If trying to match two conditional moments fails, just match the conditional mean
-    if norm(momentError) > 1e-5
-        warning('Failed to match first 2 moments. Just matching 1.')
-        p = maximumEntropyWeightsCore(yGrid,...
-            @(X) (X-conditionalMean)./scalingFactor,0,q,0);
-    end
-    P(ii,:) = kron(p,Px(mod(ii-1,Nx)+1,:));
- 
+matched = zeros(Nm,1);
+errors = zeros(Nm,2);
+for row = 1:Nm
+    conditionalMean = lambda*yxGrids(row,1);
+    conditionalVariance = exp((1-rho)*xBar+rho*yxGrids(row,2)+sigmaE^2/2);
+    z = (yGrid-conditionalMean)/sqrt(conditionalVariance);
+    prior = relativeReferenceWeights(-0.5*z.^2);
+    powers = [z;z.^2];
+    [p,matched(row)] = sequentialMomentMatch(yGrid,powers,[0;1],prior,2,1e-7);
+    errors(row,:) = (powers*p'-[0;1])';
+    P(row,:) = kron(p,Px(mod(row-1,Nx)+1,:));
 end
 yxGrids = yxGrids';
+diagnostics = struct('requestedMoments',2,'matchedMoments',matched, ...
+    'standardizedMomentErrors',errors,'momentTolerance',1e-7, ...
+    'downgradedRows',find(matched < 2),'volatility',volatilityDiagnostics,'probabilityFloor',0);
 end

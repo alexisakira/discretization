@@ -95,8 +95,7 @@ end
 
 function checksum = benchmarkCIR
 [transition,grid] = discretization.discreteCIR( ...
-    -log(0.58),0.028,0.1,0.25,9,0.995,...
-    'exponential');
+    -log(0.58),0.028,0.1,0.25,9);
 checksum = sum(transition,'all') + sum(grid,'all');
 end
 

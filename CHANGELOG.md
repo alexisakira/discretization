@@ -2,6 +2,53 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.2.0 - 2026-10-26
+
+- **Default numerical outputs change.** Remove the absolute `1e-8` reference
+  weight floor from Gaussian AR/VAR, Gaussian-mixture AR and stochastic-volatility
+  AR in MATLAB and Python. Such a floor can distort rare transitions and accumulate
+  material errors in likelihood-based estimation, even when simulated moments look
+  accurate. Grid widths and other process defaults are unchanged.
+- Construct Gaussian and mixture reference weights in log space and stabilize
+  relative to each row's maximum at machine `realmin` (`numpy.finfo(float).tiny`).
+  Match moments sequentially, retain the highest successful count, and use a point
+  mass nearest the conditional mean when mean matching is infeasible or fails.
+  Return row-level moment counts and standardized residuals (per rotated dimension
+  for VAR). Diagnostics measure moment accuracy, not transition or likelihood error.
+- Recover the 0.1.0 algorithms with MATLAB `'ProbabilityFloor',1e-8` or Python
+  `probability_floor=1e-8`. This floors **reference weights**, not final transition
+  probabilities. Explicit positive floors select the legacy algorithms and have
+  no matched-moment diagnostics. Historical entry points forward these options.
+- Align Python even-grid Gaussian-mixture AR with MATLAB, including nonzero
+  innovation means, higher-order lag structure, and infeasible-row fallbacks.
+- Include the CIR rewrite with an automatically selected strictly feasible even
+  grid and corrected exact conditional variance. Python now uses the same default;
+  explicit `method="even"` selects the same corrected construction. Retire the
+  old Python coverage/exponential interface and its incorrect variance formula.
+- Add centered Gaussian OU in MATLAB and Python, with automatic or fixed grids
+  and explicit rejection of infeasible two-moment grids. Remove the unused
+  jump-OU development feature from the release.
+- Consolidate all MATLAB Gaussian-mixture AR grid methods into one transition
+  implementation with consistent diagnostics and warnings. Use stable centered
+  innovation moments in Python as well.
+- Unify default process matching, including OU and CIR, around conditional-SD
+  scaling, `1e-7` acceptance and damped Newton refinement. Use direct two-moment
+  feasibility bounds instead of a generic nonnegative least-squares problem.
+- Reject invalid AR grid widths and non-vector Python OU grids, restore MATLAB
+  AR help text, correct diagnostic return annotations, and use portable numerical
+  tolerances for historical Python solver fixtures.
+- Stabilize the CIR density with scaled Bessel functions and log reference weights;
+  include tests, the OU compatibility entry point, regenerated MATLAB R2026a
+  default fixtures, and updated guide/API documentation. Preserve the historical
+  R2024b fixtures as independent legacy regression checks.
+- Handle small CIR noncentrality with a positive log-series fallback and the
+  central Gamma limit, avoiding underflow at valid long observation gaps.
+- Center Hermite and mixture Gaussian-quadrature reference densities on the AR
+  location, restoring location invariance in both languages.
+- Expose nested SV volatility-chain fallbacks in Python, matching MATLAB.
+  Add long-gap CIR, shifted-quadrature and nested-diagnostic regression tests;
+  remove duplicate validation and unused density evaluations on default paths.
+
 ## 0.1.0 - 2026-08-17
 
 - Add the initial Python implementation of the Farmer-Toda routines.
