@@ -6,11 +6,11 @@
 %       Discretize an AR(p) process with Gaussian mixture shocks
 %
 % Usage:
-%       [P,X] = discretization.discreteGaussianMixtureAR(...
+%       [P,X,diagnostics] = discretization.discreteGaussianMixtureAR(...
 %           mu,A,pC,muC,sigmaC,Nm,nMoments,method,nSigmas)
 %
 % Inputs:
-% mu        - unconditional mean
+% mu        - AR location (unconditional mean if the innovations have mean 0)
 % A         - vector of coefficients of AR(p)
 % pC        - vector of proportions of Gaussian mixtures
 % muC       - vector of means of Gaussian mixtures
@@ -19,45 +19,93 @@
 % Optional:
 % nMoments  - number of moments to match (default = 2)
 % method    - quadrature method (default = 'even')
-% nSigmas	- grid spacing when using even-spaced grid
+% nSigmas   - grid half-width in stationary standard deviations
+%
+% The process is X_t = mu*(1-sum(A)) + A*[X_{t-1};...] + epsilon_t.
+% Its unconditional mean is mu + sum(pC.*muC)/(1-sum(A)). To make mu
+% the unconditional mean, supply mixture means whose weighted mean is zero.
+%
+% For method='even', diagnostics reports requestedMoments, matchedMoments
+% and standardizedMomentErrors (one row per transition row, columns 1:4).
+% Errors are in powers of the innovation standard deviation, centered on
+% the conditional mean. momentTolerance is the acceptance tolerance;
+% downgradedRows identifies rows that match fewer moments than requested.
+% Grid width and resolution should be checked separately for spiky mixtures.
+% The historical default width is retained; pass nSigmas explicitly when
+% comparing resolutions. Diagnostics are empty for the optional methods.
 
-function [P,X] = discreteGaussianMixtureAR(mu,A,pC,muC,sigmaC,Nm,nMoments,method,nSigmas)
+function [P,X,diagnostics] = discreteGaussianMixtureAR(mu,A,pC,muC,sigmaC,Nm,nMoments,method,nSigmas)
 
-%% some error checking
-if any(pC < 0)
-    error('mixture proportions must be positive')
+if nargin < 6
+    error('discretization:discreteGaussianMixtureAR:NotEnoughInputs', ...
+        'Supply mu, A, pC, muC, sigmaC, and Nm.')
 end
-if any(sigmaC < 0)
-    error('standard deviations must be positive')
+validateattributes(mu,{'numeric'},{'real','finite','scalar'},mfilename,'mu',1)
+validateattributes(A,{'numeric'},{'real','finite','vector','nonempty'},mfilename,'A',2)
+validateattributes(pC,{'numeric'},{'real','finite','vector','nonempty','nonnegative'},mfilename,'pC',3)
+validateattributes(muC,{'numeric'},{'real','finite','vector','nonempty'},mfilename,'muC',4)
+validateattributes(sigmaC,{'numeric'},{'real','finite','vector','nonempty','positive'},mfilename,'sigmaC',5)
+validateattributes(Nm,{'numeric'},{'real','finite','scalar','integer','>=',3},mfilename,'Nm',6)
+if numel(pC) ~= numel(muC) || numel(pC) ~= numel(sigmaC)
+    error('discretization:discreteGaussianMixtureAR:InvalidMixture', ...
+        'pC, muC, and sigmaC must have the same length.')
 end
-if sum(pC) ~= 1
-    error('mixture proportions must add up to 1')
+probabilitySum = sum(double(pC));
+if abs(probabilitySum-1) > 1e-12
+    error('discretization:discreteGaussianMixtureAR:InvalidProbabilities', ...
+        'Mixture probabilities must sum to one within 1e-12.')
 end
 
-if size(pC,1) < size(pC,2)
-    pC = pC'; % convert to column vector
-end
-if size(muC,1) < size(muC,2)
-    muC = muC'; % convert to column vector
-end
-if size(sigmaC,1) < size(sigmaC,2)
-    sigmaC = sigmaC'; % convert to column vector
-end
+mu = double(mu);
+Nm = double(Nm);
+A = double(A(:)');
+pC = double(pC(:))/probabilitySum;
+muC = double(muC(:));
+sigmaC = double(sigmaC(:));
 
+if nargin < 7
+    nMoments = 2;
+end
+if nargin < 8
+    method = 'even';
+end
+validateattributes(nMoments,{'numeric'}, ...
+    {'real','finite','scalar','integer','>=',1,'<=',4},mfilename,'nMoments',7)
+nMoments = double(nMoments);
+if isstring(method) && isscalar(method)
+    method = char(method);
+end
+if ~ischar(method) || ~isrow(method) || ...
+        ~ismember(method,{'even','gauss-legendre','clenshaw-curtis','gauss-hermite','GMQ'})
+    error('discretization:discreteGaussianMixtureAR:InvalidMethod', ...
+        'Unknown discretization method.')
+end
 K = length(A);
-
-if size(A,1) > size(A,2)
-    A = A'; % convert A to row vector
-end
-
 F = [A;eye(K-1,K)]; % matrix to represent AR(p) by VAR(1);
 rho = max(abs(eig(F))); % spectral radius of F
-
 if rho >= 1
-    error('spectral radius must be less than one')
+    error('discretization:discreteGaussianMixtureAR:NonstationaryProcess', ...
+        'The AR companion matrix must have spectral radius less than one.')
+end
+if nargin < 9
+    if rho <= 1-2/(Nm-1)
+        nSigmas = sqrt(2*(Nm-1));
+    else
+        nSigmas = sqrt(Nm-1);
+    end
+end
+validateattributes(nSigmas,{'numeric'}, ...
+    {'real','finite','scalar','positive'},mfilename,'nSigmas',9)
+nSigmas = double(nSigmas);
+
+diagnostics = [];
+if strcmp(method,'even')
+    [P,X,diagnostics] = discreteGaussianMixtureAREven( ...
+        mu,A,pC,muC,sigmaC,Nm,nMoments,nSigmas,F);
+    return
 end
 
-% compute conditional moments
+% Historical optional quadrature methods; their numerical cleanup is deferred.
 sigmaC2 = sigmaC.^2;
 T1 = pC'*muC; % mean
 T2 = pC'*(muC.^2+sigmaC2); % uncentered second moment
@@ -67,33 +115,6 @@ T4 = pC'*(muC.^4+6*(muC.^2).*sigmaC2+3*sigmaC2.^2); % uncentered fourth moment
 TBar = [T1 T2 T3 T4]';
 
 mixturePDF = @(values) sum(normpdf(values,muC',sigmaC').*pC',2);
-
-% Set defaults for optional arguments.
-if nargin < 7
-    nMoments = 2;
-end
-if nargin < 8
-    method = 'even';
-end
-
-% Check that Nm is a valid number of grid points
-if ~isnumeric(Nm) || Nm < 3 || rem(Nm,1) ~= 0
-    error('Nm must be a positive integer greater than 3')
-end
-
-% Check that nMoments is a valid number
-if ~isnumeric(nMoments) || nMoments < 1 || nMoments > 4 || ~((rem(nMoments,1) == 0) || (nMoments == 1))
-    error('nMoments must be either 1, 2, 3, 4')
-end
-
-% set default nSigmas if not supplied
-if nargin < 9
-    if rho <= 1-2/(Nm-1)
-        nSigmas = sqrt(2*(Nm-1));
-    else
-        nSigmas = sqrt(Nm-1);
-    end
-end
 
 sigma = sqrt(T2-T1^2); % conditional standard deviation
 firstBasisVector = [1;zeros(K^2-1,1)];

@@ -16,21 +16,13 @@ figure
 plot(x,discretization.cirTransitionDensity(x,r,a,b,sigma,Delta));
 
 N = 9;
-Coverage = 0.995; % coverage rate of the grid (optional)
-%method = 'even';
-method = 'exponential'; % grid choice (optional)
 
 tic
-[P,X] = discretization.discreteCIR(a,b,sigma,Delta,N,Coverage,method);
+[P,X] = discretization.discreteCIR(a,b,sigma,Delta,N);
 toc
 
-if strcmp(method,'even')
-    h = X(2) - X(1); %#ok<UNRCH> selectable example branch
-    dX = ones(size(X))/h;
-elseif strcmp(method,'exponential')
-    h = log(X(2)) - log(X(1)); % grid spacing in log
-    dX = 1./(h*X);
-end
+h = X(2) - X(1);
+dX = ones(size(X))/h;
 
 figure
 plot(X,P(floor(N/4),:).*dX,X,P(floor(N/2),:).*dX,X,P(ceil(3*N/4),:).*dX)

@@ -8,8 +8,6 @@ repositoryRoot = fileparts(fileparts(mfilename('fullpath')));
 addpath(genpath(repositoryRoot));
 testCase.TestData.Fixture = load(fullfile(repositoryRoot,...
     'reference_data','matlab_r2024b_performance.mat'));
-testCase.TestData.CIRFixture = load(fullfile(repositoryRoot,...
-    'reference_data','matlab_r2024b_milestone2.mat'));
 warningState = warning;
 testCase.TestData.WarningCleanup = onCleanup(@() warning(warningState));
 warning('off','all');
@@ -59,13 +57,26 @@ verifyEqual(testCase,grid,fixture.svGrid,'AbsTol',1e-10)
 verifyEqual(testCase,transition,fixture.svTransition,'AbsTol',1e-8)
 end
 
-function testCIRParity(testCase)
-fixture = testCase.TestData.CIRFixture;
+function testCIRMoments(testCase)
+kappa = -log(0.58);
+mu = 0.028;
+sigma = 0.1;
+Delta = 0.25;
+stateCount = 9;
 [transition,grid] = discretization.discreteCIR( ...
-    fixture.cirA,fixture.cirB,...
-    fixture.cirSigma,fixture.cirDelta,fixture.cirStateCount,...
-    fixture.cirCoverage,'exponential');
-verifyEqual(testCase,grid,fixture.cirGridExponential,'AbsTol',1e-10)
-verifyEqual(testCase,transition,fixture.cirTransitionExponential,...
-    'AbsTol',1e-8)
+    kappa,mu,sigma,Delta,stateCount);
+
+spacing = mu*log(stateCount)/(stateCount-1);
+verifyEqual(testCase,grid,spacing*(1:stateCount),'AbsTol',1e-12)
+
+rho = exp(-kappa*Delta);
+c = 1-rho;
+conditionalMean = rho*grid+c*mu;
+conditionalVariance = (sigma^2/kappa)*c*(rho*grid+(mu/2)*c);
+discreteMean = transition*grid';
+centeredGrid = grid-conditionalMean';
+discreteVariance = sum(transition.*centeredGrid.^2,2);
+
+verifyEqual(testCase,discreteMean,conditionalMean','AbsTol',1e-8)
+verifyEqual(testCase,discreteVariance,conditionalVariance','AbsTol',1e-8)
 end

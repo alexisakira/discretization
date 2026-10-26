@@ -30,6 +30,32 @@ verifyMarkovApproximation(testCase, transition, grid, 9);
 verifyGreaterThan(testCase, grid, zeros(size(grid)));
 end
 
+function testDiscreteOUAutomaticGridAndMoments(testCase)
+kappa = 0.7;
+sigma = 0.3;
+stateCount = 9;
+omega = sigma/sqrt(2*kappa);
+gaps = [0.25,1];
+
+for gap = gaps
+    [transition,grid] = discretization.discreteOU( ...
+        kappa,sigma,gap,stateCount);
+    verifyMarkovApproximation(testCase,transition,grid,stateCount);
+    verifyEqual(testCase,grid([1,end]), ...
+        [-1,1]*omega*sqrt(stateCount-1),'AbsTol',1e-12);
+
+    rho = exp(-kappa*gap);
+    conditionalMean = transition*grid';
+    conditionalVariance = transition*(grid'.^2) ...
+        -conditionalMean.^2;
+    verifyEqual(testCase,conditionalMean,rho*grid', ...
+        'AbsTol',1e-7*omega);
+    verifyEqual(testCase,conditionalVariance, ...
+        omega^2*(1-rho^2)*ones(stateCount,1), ...
+        'AbsTol',1e-7*omega^2);
+end
+end
+
 function testDiscreteGMARDefaultArguments(testCase)
 [transition, grid] = discretization.discreteGaussianMixtureAR( ...
     0.0555, 0.5854, [0.1628, 0.8372], ...

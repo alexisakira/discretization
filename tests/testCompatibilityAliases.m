@@ -42,7 +42,7 @@ verifyEqual(testCase,actualX,expectedX)
 verifyEqual(testCase,actualP,expectedP)
 verifyEqual(testCase,actualX,expectedX)
 
-cirArguments = {-log(0.58),0.028,0.1,0.25,5,0.995,'exponential'};
+cirArguments = {-log(0.58),0.028,0.1,0.25,9};
 [actualP,actualX] = discreteCIR(cirArguments{:});
 [expectedP,expectedX] = discretization.discreteCIR(cirArguments{:});
 verifyEqual(testCase,actualP,expectedP)

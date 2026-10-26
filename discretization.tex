@@ -473,13 +473,13 @@ The Feller restriction $\sigma^2<2ab$ is imposed. The conditional moments are
 \begin{align*}
   \CE{r'|r}&=r\e^{-a\Delta}+b(1-\e^{-a\Delta}),\\
   \Cvar{r'|r}&=\frac{\sigma^2}{a}(1-\e^{-a\Delta})
-  \left(r\e^{-a\Delta}+\frac b2\right).
+  \left(r\e^{-a\Delta}+\frac b2(1-\e^{-a\Delta})\right).
 \end{align*}
 
 The interfaces are
 \begin{lstlisting}[language=Matlab]
 [P, X] = discretization.discreteCIR( ...
-    a, b, sigma, Delta, N, Coverage, method);
+    a, b, sigma, Delta, N);
 \end{lstlisting}
 \begin{lstlisting}[language=Python]
 P, grid = discrete_cir(
@@ -487,10 +487,12 @@ P, grid = discrete_cir(
     state_count, coverage=0.999, method="exponential",
 )
 \end{lstlisting}
-Both evenly spaced and exponential grids are available. The exponential grid
-is the default because the process is positive and its stationary distribution
-can be concentrated near zero. The density itself is available through
-\code{cirTransitionDensity} and \code{cir\_transition\_density}.
+The Matlab routine automatically selects an evenly spaced grid that satisfies
+the sufficient conditions for matching the first two conditional moments and
+maximizes stationary coverage within the feasible set. The Python interface
+currently retains the coverage and grid-method options shown above. The density
+itself is available through \code{cirTransitionDensity} and
+\code{cir\_transition\_density}.
 
 \section{Distribution and quadrature routines}
 

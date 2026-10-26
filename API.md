@@ -54,6 +54,35 @@ wrappers for their canonical replacements.
 Compatibility entry points will remain during the modernization period. Their
 removal, if any, should occur only in a future major release.
 
+## Gaussian-mixture AR on an evenly spaced grid
+
+The optional third output reports accuracy by transition row:
+
+```matlab
+[P,X,info] = discretization.discreteGaussianMixtureAR( ...
+    0,0.95,[0.05 0.95],[-0.8 0.8*0.05/0.95],[0.2 0.03], ...
+    127,4,'even',4);
+```
+
+The final argument fixes the grid half-width in stationary standard
+deviations. Choose width and resolution separately when checking convergence;
+the historical default width expands with the point count. A narrow mixture
+component can require substantially more points than a Gaussian innovation.
+
+`info.matchedMoments` gives the number of moments matched in each row;
+zero means even the conditional mean could not be matched.
+`info.downgradedRows` identifies fallback rows. `info.standardizedMomentErrors`
+has four columns containing centered conditional-moment errors in powers of
+the innovation standard deviation, with acceptance tolerance
+`info.momentTolerance`. Diagnostics describe moment accuracy, not a bound on
+tail-probability error. Check tails separately when they matter.
+
+The AR location `mu` is the unconditional mean only when the weighted
+innovation mean is zero. Otherwise the unconditional mean is
+`mu + sum(pC.*muC)/(1-sum(A))`. Component means need not individually be zero.
+The optional quadrature methods retain their historical implementation and
+return empty diagnostics.
+
 ## Python names
 
 Python uses the same concepts in snake case:

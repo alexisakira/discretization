@@ -1,109 +1,210 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % discreteCIR
-% (c) 2019 Alexis Akira Toda
+% (c) 2019--2026 Alexis Akira Toda
 %
 % Purpose:
 %       Compute a finite-state Markov chain approximation to the
 %       Cox-Ingersoll-Ross model
-%       dr_t = a*(b-r_t)*dt + sigma*sqrt(r_t)*dW_t
+%       dX_t = kappa*(mu-X_t)*dt + sigma*sqrt(X_t)*dW_t.
+%       The routine uses an automatically selected evenly spaced grid
+%       x_n = d*n and matches the first two conditional moments exactly.
 %
 % Usage:
 %       [P,X] = discretization.discreteCIR(...
-%           a,b,sigma,Delta,N,Coverage,method)
+%           kappa,mu,sigma,Delta,N)
 %
 % Inputs:
-% a         - mean reversion parameter
-% b         - unconditional mean of interest rate
+% kappa     - mean reversion parameter
+% mu        - unconditional mean
 % sigma     - volatility parameter
-% Delta     - length of one period; for example, if parameters a, b, sigma
-%           are calibrated at annual frequency and you want to discretize
-%           the model at quarterly frequency, set Delta = 1/4.
-% N         - number of grid points
-% Optional:
-% Coverage  - coverage probability of grid (default = 0.999)
-% method    - grid specification ('even' or 'exponential' (default))
+% Delta     - length of one period
+% N         - number of grid points (integer greater than or equal to 3)
 %
 % Outputs:
-% P         - N x N transition probability matrix
-% X         - 1 x N vector of grid
+% P         - N-by-N transition probability matrix
+% X         - 1-by-N vector of grid points
 %
-% Version 1.1, May 28, 2019
+% Version 2.0, September 17, 2026
 %
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+% Select the grid from the sufficient two-moment feasibility conditions.
+% Among guaranteed-feasible grids, maximize stationary coverage subject to
+% a small numerical margin from the boundary of the feasible interval.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function [P,X] = discreteCIR(a,b,sigma,Delta,N,Coverage,method)
+function [P,X] = discreteCIR(kappa,mu,sigma,Delta,N)
 
-%% some error checking
-% Make sure the correct number of arguments are provided
+%% Input validation
 if nargin < 5
-    error('You must supply at least 5 arguments to discreteCIR')
-end
-if nargin < 6 % Coverage not provided
-    Coverage = 0.999; % cover 99.9% of state space
-end
-if nargin < 7 % grid choice not provided
-    method = 'exponential';
-else
-    if ~strcmp(method,'even')&&~strcmp(method,'exponential')
-        error('Method must be either even or exponential')
-    end
+    error('discretization:discreteCIR:NotEnoughInputs', ...
+        'You must supply kappa, mu, sigma, Delta, and N.')
 end
 
-if (a <= 0)||(b <= 0)||(sigma <= 0)||(Delta <= 0)
-    error('a, b, sigma, Delta must be positive')
+validateattributes(kappa,{'numeric'}, ...
+    {'real','finite','scalar','positive'},mfilename,'kappa',1)
+validateattributes(mu,{'numeric'}, ...
+    {'real','finite','scalar','positive'},mfilename,'mu',2)
+validateattributes(sigma,{'numeric'}, ...
+    {'real','finite','scalar','positive'},mfilename,'sigma',3)
+validateattributes(Delta,{'numeric'}, ...
+    {'real','finite','scalar','positive'},mfilename,'Delta',4)
+validateattributes(N,{'numeric'}, ...
+    {'real','finite','scalar','integer','>=',3},mfilename,'N',5)
+
+if sigma^2 > 2*kappa*mu
+    error('discretization:discreteCIR:FellerCondition', ...
+        'The Feller condition sigma^2 <= 2*kappa*mu must hold.')
 end
 
-if 2*a*b - sigma^2 <= 0
-    error('It must be sigma^2 < 2*a*b')
+%% Select the evenly spaced grid
+rho = exp(-kappa*Delta);
+c = -expm1(-kappa*Delta); % numerically stable evaluation of 1-rho
+eta = sigma^2/(kappa*mu);
+
+[rLower,rUpper] = feasibleSpacingInterval(rho,eta,N);
+if isnan(rLower)
+    error('discretization:discreteCIR:EmptyFeasibleSet', ...
+        ['No grid x_n = d*n satisfies the sufficient two-moment ', ...
+        'feasibility conditions for N = %d. Increase N.'],N)
 end
 
-% Check that N is a valid number of grid points
-if ~isnumeric(N) || N < 2 || rem(N,1) ~= 0
-    error('N must be a positive integer greater than 2')
+% The strict feasibility conditions define an open interval. Stay a small
+% distance from its boundary to avoid an ill-conditioned dual problem.
+% Let the trim shrink with N so the selected grid still refines asymptotically.
+trimFraction = min(1e-4,1/N);
+intervalWidth = rUpper-rLower;
+rLowerSafe = rLower+trimFraction*intervalWidth;
+rUpperSafe = rUpper-trimFraction*intervalWidth;
+
+% Unconstrained maximizer of stationary Gamma coverage on [d,N*d].
+rCoverage = log(N)/(N-1);
+r = min(rUpperSafe,max(rLowerSafe,rCoverage));
+d = mu*r;
+X = d*(1:N);
+
+if any(feasibilityFunctions(r,rho,eta,N) <= 0)
+    error('discretization:discreteCIR:GridSelectionFailure', ...
+        'The automatically selected grid is not strictly feasible.')
 end
 
-if (Coverage <= 0)||(Coverage >= 1)
-    error('coverage must be between 0 and 1')
-end
-
-%% construct the grid
-
-alpha = 2*a*b/sigma^2;
-beta = 2*a/sigma^2;
-
-p = [1-Coverage 1+Coverage]/2;
-pd = makedist('Gamma','a',alpha,'b',1/beta);
-quantiles = icdf(pd,p);
-
-if strcmp(method,'even')
-    X = linspace(quantiles(1),quantiles(2),N); % evenly-spaced grid to cover coverage
-    W = ones(size(X));
-elseif strcmp(method,'exponential')
-    X = exp(linspace(log(quantiles(1)),log(quantiles(2)),N)); % exponential grid
-    W = X; % change of variable formula when using exponential grid
-end
-W = W/sum(W); % normalization (not necessary; just in case for numerical stability)
-
+%% Construct the transition matrix
 P = NaN(N);
-scalingFactor = max(abs(X));
-ea = exp(-a*Delta); % constant used in following calculation
+scalingFactor = X(end);
+momentErrorTolerance = 1e-7;
 
 for ii = 1:N
-    r = X(ii); % current interest rate
-    condMean = r*ea + b*(1-ea); % conditional mean
-    condVar = (sigma^2/a)*(1 - ea)*(r*ea + b/2); % conditional variance
-    TBar = [0 condVar]'; % conditional first and second moments (centered)
-    q = W.*discretization.cirTransitionDensity(X,r,a,b,sigma,Delta); % weighted conditional pdf (prior)
-    % do maximum entropy discretization
-    [p,~,momentError] = maximumEntropyWeightsCore(X,@(x) [(x-condMean)./scalingFactor;...
-        ((x-condMean)./scalingFactor).^2],TBar./(scalingFactor.^(1:2)'),q,zeros(2,1));
-    if norm(momentError) > 1e-5 % if 2 moments fail, then just match 1 moment
-        warning('Failed to match first 2 moments. Just matching 1.')
-        P(ii,:) = maximumEntropyWeightsCore(X,@(x)(x-condMean)/scalingFactor,0,q,0);
-    else
-        P(ii,:) = p;
+    x = X(ii);
+    condMean = rho*x+c*mu;
+    condVar = (sigma^2/kappa)*c*(rho*x+(mu/2)*c);
+
+    % On an evenly spaced grid, equal quadrature weights cancel after
+    % normalization, so the prior is proportional to the transition density.
+    q = discretization.cirTransitionDensity( ...
+        X,x,kappa,mu,sigma,Delta);
+    if any(~isfinite(q)) || ~any(q > 0)
+        error('discretization:discreteCIR:InvalidPrior', ...
+            'The transition-density prior is not finite and positive in row %d.',ii)
+    end
+    q = max(q,realmin);
+    q = q/sum(q);
+
+    momentFunction = @(state) [ ...
+        (state-condMean)./scalingFactor; ...
+        ((state-condMean)./scalingFactor).^2];
+    targetMoments = [0;condVar/scalingFactor^2];
+
+    [probability,~,momentError] = maximumEntropyWeightsCore( ...
+        X,momentFunction,targetMoments,q,zeros(2,1));
+    if any(~isfinite(probability)) || ...
+            norm(momentError,Inf) > momentErrorTolerance
+        error('discretization:discreteCIR:MomentMatchingFailure', ...
+            ['Two-moment matching failed numerically in row %d even ', ...
+            'though the selected grid is theoretically feasible.'],ii)
+    end
+    P(ii,:) = probability;
+end
+
+end
+
+
+function [rLower,rUpper] = feasibleSpacingInterval(rho,eta,N)
+% Return the open interval of normalized feasible spacings r = d/mu.
+domainLower = 1/N;
+domainUpper = 1;
+c = 1-rho;
+
+coefficients = [ ...
+    -1, 4*eta*c*rho, 2*eta*c^2; ...
+    -(N-rho), N+1-2*rho-eta*rho, -c*(1+eta/2); ...
+    N*(rho*N-1), N+1-rho*N*(2+eta), -c*(1+eta/2)];
+
+breakpoints = [domainLower,domainUpper];
+for row = 1:size(coefficients,1)
+    candidateRoots = realRootsInInterval( ...
+        coefficients(row,:),domainLower,domainUpper);
+    breakpoints = [breakpoints,candidateRoots]; %#ok<AGROW>
+end
+breakpoints = mergeClosePoints(sort(breakpoints));
+
+feasibleIntervals = zeros(0,2);
+for interval = 1:(numel(breakpoints)-1)
+    left = breakpoints(interval);
+    right = breakpoints(interval+1);
+    midpoint = (left+right)/2;
+    if all(feasibilityFunctions(midpoint,rho,eta,N) > 0)
+        feasibleIntervals(end+1,:) = [left,right]; %#ok<AGROW>
     end
 end
 
+if isempty(feasibleIntervals)
+    rLower = NaN;
+    rUpper = NaN;
+elseif size(feasibleIntervals,1) == 1
+    rLower = feasibleIntervals(1,1);
+    rUpper = feasibleIntervals(1,2);
+else
+    error('discretization:discreteCIR:DisconnectedFeasibleSet', ...
+        'The computed feasible set is unexpectedly disconnected.')
 end
 
+end
+
+
+function values = feasibilityFunctions(r,rho,eta,N)
+% Evaluate S(r), L_N(r), and U_N(r) from the grid-feasibility corollary.
+c = 1-rho;
+S = 4*eta*c*(rho*r+c/2)-r^2;
+L = (1-r)*((N-rho)*r-c)-eta*(rho*r+c/2);
+U = ((rho*N-1)*r+c)*(N*r-1)-eta*(rho*N*r+c/2);
+values = [S,L,U];
+end
+
+
+function intervalRoots = realRootsInInterval(coefficients,lower,upper)
+% Compute real roots strictly inside an interval, allowing a linear case.
+scale = max(abs(coefficients));
+coefficientTolerance = 100*eps(max(1,scale));
+firstNonzero = find(abs(coefficients) > coefficientTolerance,1,'first');
+
+if isempty(firstNonzero) || firstNonzero == numel(coefficients)
+    intervalRoots = [];
+    return
+end
+
+allRoots = roots(coefficients(firstNonzero:end));
+realMask = abs(imag(allRoots)) <= ...
+    1e-10*max(1,abs(real(allRoots)));
+realRoots = real(allRoots(realMask));
+intervalRoots = realRoots(realRoots > lower & realRoots < upper).';
+end
+
+
+function merged = mergeClosePoints(points)
+% Merge numerically indistinguishable polynomial roots.
+merged = points(1);
+for index = 2:numel(points)
+    tolerance = 1e-11*max([1,abs(points(index)),abs(merged(end))]);
+    if points(index)-merged(end) > tolerance
+        merged(end+1) = points(index); %#ok<AGROW>
+    end
+end
+end
